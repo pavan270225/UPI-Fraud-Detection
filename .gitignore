@@ -1,0 +1,9 @@
+data/**/*.csv
+data/**/*.parquet
+models/*.joblib
+models/*.json
+reports/*.csv
+reports/*.txt
+venv/
+__pycache__/
+.DS_Store
