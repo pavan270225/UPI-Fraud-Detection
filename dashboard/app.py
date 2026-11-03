@@ -707,6 +707,59 @@ elif page == "🔍 SHAP Explanations":
 elif page == "📈 Drift Monitoring":
     st.title("📈 Drift Monitoring (PSI/KS)")
 
+    # ── Live Drift Detection ──
+    st.subheader("🔴 Live Drift Detection")
+    st.markdown("Run PSI/KS drift detection on live data windows.")
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        live_dataset = st.selectbox("Dataset", ["ieee-cis", "paysim"], key="live_dataset")
+    with col2:
+        live_ref_days = st.slider("Reference Days", 1, 30, 7, key="live_ref_days")
+    with col3:
+        live_cur_days = st.slider("Current Days", 1, 30, 7, key="live_cur_days")
+
+    if st.button("🔍 Run Drift Detection", key="live_drift_btn"):
+        with st.spinner("Running drift detection..."):
+            try:
+                result = stage_drift(
+                    dataset=live_dataset,
+                    reference_window_days=live_ref_days,
+                    current_window_days=live_cur_days,
+                )
+                st.session_state["live_drift_result"] = result
+                st.success("✅ Drift detection completed!")
+            except Exception as exc:
+                st.error(f"❌ Drift detection failed: {exc}")
+
+    # Show live results
+    if "live_drift_result" in st.session_state:
+        result = st.session_state["live_drift_result"]
+        alerts = result.get("alerts", [])
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Total Alerts", len(alerts))
+        with col2:
+            feature_count = sum(1 for a in alerts if a.get("type") == "feature_drift")
+            st.metric("Feature Drift", feature_count)
+        with col3:
+            score_count = sum(1 for a in alerts if "score_drift" in a.get("type", ""))
+            st.metric("Score Drift", score_count)
+
+        if alerts:
+            st.subheader("🚨 Active Drift Alerts")
+            for alert in alerts:
+                value = alert.get("value", 0)
+                if value > 0.3:
+                    severity = "🔴 High"
+                elif value > 0.2:
+                    severity = "🟡 Medium"
+                else:
+                    severity = "🟢 Low"
+                st.write(f"{severity} — {alert['type']}: {alert['column']} ({alert['metric']}={value:.4f})")
+
+    st.divider()
+
+    # Existing reports
     if not reports['drift_alerts'].empty:
         alerts_df = reports['drift_alerts']
 
