@@ -31,6 +31,7 @@ from data_prep import load_ieee_cis, load_paysim, prepare_features_target
 from models import evaluate_model, get_model
 from drift_detection import DriftMonitor, population_stability_index
 from shap_explainer import SHAPExplainer
+from pipeline import stage_train, stage_drift, stage_retrain
 
 # Page config
 st.set_page_config(
@@ -166,7 +167,8 @@ st.sidebar.markdown("---")
 
 page = st.sidebar.radio(
     "Navigate",
-    ["📊 Overview", "🎯 Risk Scoring", "🤖 Model Comparison", "🔍 SHAP Explanations", "📈 Drift Monitoring",
+    ["📊 Overview", "🎯 Risk Scoring", "🤖 Model Comparison", "🚀 Pipeline Control",
+     "🔍 SHAP Explanations", "📈 Drift Monitoring",
      "⚙️ Retraining Strategies", "⏱️ Delayed Labels", "📋 Reports"]
 )
 
@@ -433,6 +435,153 @@ elif page == "🤖 Model Comparison":
         else:
             st.info("Model column not found in metrics. Available columns: " + ", ".join(
                 list(ieee_df.columns) + list(paysim_df.columns)))
+
+# ============================================================
+# PAGE: PIPELINE CONTROL
+# ============================================================
+elif page == "🚀 Pipeline Control":
+    st.title("🚀 Pipeline Control")
+
+    st.markdown("Run pipeline operations directly from the dashboard. "
+                "Operations call the backend pipeline modules in real time.")
+
+    dataset = st.selectbox("Dataset", ["ieee-cis", "paysim"], key="pc_dataset")
+
+    # ── Train ──
+    st.subheader("📚 Train Models")
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        pc_model = st.selectbox("Model",
+                                ["lightgbm", "logistic_regression", "random_forest", "xgboost", "all"],
+                                key="pc_model")
+    with col2:
+        pc_train_ratio = st.slider("Train Ratio", 0.5, 0.9, 0.7, 0.05, key="pc_train_ratio")
+    with col3:
+        pc_val_ratio = st.slider("Val Ratio", 0.05, 0.3, 0.15, 0.05, key="pc_val_ratio")
+    pc_test_ratio = st.slider("Test Ratio", 0.05, 0.3, 0.15, 0.05, key="pc_test_ratio")
+
+    if st.button("🏋️ Train", key="pc_train_btn"):
+        with st.spinner("Training models..."):
+            try:
+                result = stage_train(
+                    dataset=dataset,
+                    model_name=None if pc_model == "all" else pc_model,
+                    train_ratio=pc_train_ratio,
+                    val_ratio=pc_val_ratio,
+                    test_ratio=pc_test_ratio,
+                    quiet=True,
+                )
+                st.success("✅ Training completed!")
+                if "models" in result:
+                    for name, m in result["models"].items():
+                        if "error" in m:
+                            st.error(f"{name}: {m['error']}")
+                        else:
+                            st.write(f"**{name}**: Val PR-AUC = {m['val_metrics']['pr_auc']:.4f}, "
+                                     f"Test PR-AUC = {m['test_metrics']['pr_auc']:.4f}")
+            except Exception as exc:
+                st.error(f"❌ Training failed: {exc}")
+
+    st.divider()
+
+    # ── Drift ──
+    st.subheader("📈 Drift Detection")
+    col1, col2 = st.columns(2)
+    with col1:
+        pc_ref_days = st.slider("Reference Days", 1, 30, 7, key="pc_ref_days")
+    with col2:
+        pc_cur_days = st.slider("Current Days", 1, 30, 7, key="pc_cur_days")
+
+    if st.button("🔍 Detect Drift", key="pc_drift_btn"):
+        with st.spinner("Running drift detection..."):
+            try:
+                result = stage_drift(
+                    dataset=dataset,
+                    reference_window_days=pc_ref_days,
+                    current_window_days=pc_cur_days,
+                )
+                st.success("✅ Drift detection completed!")
+                st.write(f"**Alerts**: {len(result.get('alerts', []))}")
+                for alert in result.get("alerts", []):
+                    st.write(f"- {alert['type']}: {alert['column']} ({alert['metric']}={alert['value']:.4f})")
+            except Exception as exc:
+                st.error(f"❌ Drift detection failed: {exc}")
+
+    st.divider()
+
+    # ── Retrain ──
+    st.subheader("🔄 Drift-Triggered Retraining")
+    col1, col2 = st.columns(2)
+    with col1:
+        pc_retrain_model = st.selectbox("Model",
+                                        ["lightgbm", "logistic_regression", "random_forest", "xgboost"],
+                                        key="pc_retrain_model")
+    with col2:
+        pc_force = st.checkbox("Force Retrain", key="pc_force")
+    pc_psi = st.slider("PSI Threshold", 0.1, 0.5, 0.2, 0.05, key="pc_psi")
+    pc_ks = st.slider("KS Threshold", 0.01, 0.2, 0.05, 0.01, key="pc_ks")
+
+    if st.button("🔄 Retrain", key="pc_retrain_btn"):
+        with st.spinner("Checking drift and retraining if needed..."):
+            try:
+                result = stage_retrain(
+                    dataset=dataset,
+                    model_name=pc_retrain_model,
+                    train_ratio=pc_train_ratio,
+                    val_ratio=pc_val_ratio,
+                    test_ratio=pc_test_ratio,
+                    psi_threshold=pc_psi,
+                    ks_threshold=pc_ks,
+                    force=pc_force,
+                    quiet=True,
+                )
+                if result["retrained"]:
+                    st.success(f"✅ Model retrained (trigger: {result['trigger']})!")
+                else:
+                    st.info("ℹ️ No retraining needed — drift below thresholds.")
+                st.write(f"**Val PR-AUC**: {result['val_metrics']['pr_auc']:.4f}")
+                st.write(f"**Test PR-AUC**: {result['test_metrics']['pr_auc']:.4f}")
+                if result["drift_alerts"]:
+                    st.write(f"**Drift alerts**: {len(result['drift_alerts'])}")
+            except Exception as exc:
+                st.error(f"❌ Retraining failed: {exc}")
+
+    st.divider()
+
+    # ── Run all ──
+    st.subheader("🔄 Full Pipeline")
+    st.markdown("Run train → evaluate → drift → retrain → shap in sequence.")
+
+    if st.button("▶️ Run All", key="pc_run_all_btn"):
+        with st.spinner("Running full pipeline..."):
+            try:
+                stage_train(
+                    dataset=dataset,
+                    model_name=pc_retrain_model,
+                    train_ratio=pc_train_ratio,
+                    val_ratio=pc_val_ratio,
+                    test_ratio=pc_test_ratio,
+                    save=True,
+                    quiet=True,
+                )
+                st.success("✅ Train complete")
+                stage_drift(dataset=dataset)
+                st.success("✅ Drift detection complete")
+                stage_retrain(
+                    dataset=dataset,
+                    model_name=pc_retrain_model,
+                    train_ratio=pc_train_ratio,
+                    val_ratio=pc_val_ratio,
+                    test_ratio=pc_test_ratio,
+                    psi_threshold=pc_psi,
+                    ks_threshold=pc_ks,
+                    force=pc_force,
+                    quiet=True,
+                )
+                st.success("✅ Retrain check complete")
+                st.success("🎉 Full pipeline completed!")
+            except Exception as exc:
+                st.error(f"❌ Pipeline failed: {exc}")
 
 # ============================================================
 # PAGE: SHAP EXPLANATIONS
