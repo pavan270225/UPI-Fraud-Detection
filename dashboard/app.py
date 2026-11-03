@@ -34,6 +34,11 @@ from drift_detection import DriftMonitor, population_stability_index
 from shap_explainer import SHAPExplainer
 from pipeline import stage_train, stage_drift, stage_retrain
 
+# API client for integration testing
+from starlette.testclient import TestClient
+from api import app as api_app
+api_client = TestClient(api_app)
+
 # Page config
 st.set_page_config(
     page_title="UPI Fraud Detection Dashboard",
@@ -213,7 +218,7 @@ page = st.sidebar.radio(
     "Navigate",
     ["📊 Overview", "🎯 Risk Scoring", "🤖 Model Comparison", "🚀 Pipeline Control",
      "🔍 SHAP Explanations", "📈 Drift Monitoring",
-     "⚙️ Retraining Strategies", "⏱️ Delayed Labels", "📜 Prediction History", "📋 Reports"]
+     "⚙️ Retraining Strategies", "⏱️ Delayed Labels", "📜 Prediction History", "📋 Reports", "🔌 API Integration"]
 )
 
 # Load reports
@@ -1242,6 +1247,92 @@ elif page == "📋 Reports":
         with st.spinner("Generating report..."):
             # This would call the evaluation module
             st.success("Report regeneration triggered. Check notebook 07_evaluation.ipynb")
+
+# ============================================================
+# PAGE: API INTEGRATION
+# ============================================================
+elif page == "🔌 API Integration":
+    st.title("🔌 API Integration")
+    st.markdown("Interact with the UPI Fraud Detection API endpoints directly from the dashboard.")
+
+    # Health check
+    st.subheader("🏥 Health Check")
+    if st.button("Check API Health", key="api_health_btn"):
+        try:
+            response = api_client.get("/health")
+            if response.status_code == 200:
+                st.success(f"✅ API is healthy: {response.json()}")
+            else:
+                st.error(f"❌ API returned status {response.status_code}")
+        except Exception as exc:
+            st.error(f"❌ API health check failed: {exc}")
+
+    st.divider()
+
+    # Prediction endpoint
+    st.subheader("🔮 Test Prediction")
+    st.markdown("Send a prediction request to the API.")
+
+    with st.form("api_predict_form"):
+        col1, col2 = st.columns(2)
+        with col1:
+            api_dataset = st.selectbox("Dataset", ["ieee-cis", "paysim"], key="api_dataset")
+            api_model = st.selectbox("Model", ["lightgbm", "logistic_regression", "random_forest", "xgboost"], key="api_model")
+        with col2:
+            api_features_json = st.text_area(
+                "Features (JSON)",
+                value='{"TransactionAmt": 150.0, "card1": 12345, "card4": "visa", "ProductCD": "W"}',
+                height=150,
+                key="api_features_json"
+            )
+
+        submitted = st.form_submit_button("Send Prediction Request")
+
+    if submitted:
+        try:
+            import json as _json
+            features = _json.loads(api_features_json)
+            response = api_client.post("/predict", json={
+                "dataset": api_dataset,
+                "model": api_model,
+                "features": features,
+            })
+            if response.status_code == 200:
+                data = response.json()
+                st.success("✅ Prediction successful!")
+                preds = data.get("predictions", [])[:3]
+                if preds:
+                    cols = st.columns(min(len(preds), 3))
+                    for i, pred in enumerate(preds):
+                        with cols[i]:
+                            st.metric(f"Prediction {i + 1}", f"{pred['fraud_score']:.4f}",
+                                     delta="Fraud" if pred["is_fraud"] == 1 else "Legit")
+                st.json(data)
+            else:
+                st.error(f"❌ API returned status {response.status_code}: {response.json()}")
+        except json.JSONDecodeError:
+            st.error("❌ Invalid JSON in features field")
+        except Exception as exc:
+            st.error(f"❌ Prediction request failed: {exc}")
+
+    st.divider()
+
+    # API endpoints documentation
+    st.subheader("📚 API Endpoints")
+    endpoints = [
+        {"method": "GET", "path": "/health", "description": "Health check"},
+        {"method": "POST", "path": "/predict", "description": "Fraud risk scoring (accepts features, returns score + prediction)"},
+    ]
+    for ep in endpoints:
+        col1, col2, col3 = st.columns([1, 3, 6])
+        with col1:
+            st.code(ep["method"], language="text")
+        with col2:
+            st.code(ep["path"], language="text")
+        with col3:
+            st.write(ep["description"])
+
+    st.info("Run the API server: `uvicorn src.api:app --reload --host 0.0.0.0 --port 8000`")
 
 # Footer
 st.sidebar.markdown("---")
