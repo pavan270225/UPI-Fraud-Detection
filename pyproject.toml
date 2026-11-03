@@ -1,0 +1,19 @@
+[project]
+name = "upi-fraud-detection"
+version = "0.1.0"
+description = "Drift-aware, explainable ML framework for UPI fraud detection"
+requires-python = ">=3.10"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pyright]
+include = ["src", "notebooks", "dashboard", "tests"]
+extraPaths = ["src"]
