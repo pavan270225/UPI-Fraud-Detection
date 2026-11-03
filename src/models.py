@@ -13,6 +13,7 @@ import numpy as np
 import pandas as pd
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import GridSearchCV, RandomizedSearchCV
 from sklearn.metrics import (
     average_precision_score,
     precision_score,
@@ -21,6 +22,8 @@ from sklearn.metrics import (
 )
 import xgboost as xgb
 import lightgbm as lgb
+
+
 
 
 class ModelTrainingError(Exception):
@@ -81,6 +84,38 @@ MODEL_CONFIGS = {
 }
 
 
+# Hyperparameter search grids for each model type.
+# Keys must match MODEL_CONFIGS model names.
+MODEL_PARAM_GRIDS: Dict[str, Dict[str, list]] = {
+    'logistic_regression': {
+        'C': [0.01, 0.1, 1.0, 10.0, 100.0],
+        'solver': ['lbfgs', 'liblinear'],
+        'class_weight': [None, 'balanced'],
+    },
+    'random_forest': {
+        'n_estimators': [100, 200, 300],
+        'max_depth': [None, 10, 20, 30],
+        'min_samples_split': [2, 5, 10],
+        'min_samples_leaf': [1, 2, 4],
+        'class_weight': [None, 'balanced', 'balanced_subsample'],
+    },
+    'xgboost': {
+        'n_estimators': [100, 300, 500],
+        'max_depth': [3, 6, 10],
+        'learning_rate': [0.01, 0.05, 0.1],
+        'subsample': [0.8, 0.9, 1.0],
+        'colsample_bytree': [0.8, 0.9, 1.0],
+    },
+    'lightgbm': {
+        'n_estimators': [100, 300, 500],
+        'max_depth': [3, 6, 10],
+        'learning_rate': [0.01, 0.05, 0.1],
+        'subsample': [0.8, 0.9, 1.0],
+        'colsample_bytree': [0.8, 0.9, 1.0],
+    },
+}
+
+
 def get_model(model_name: str, class_weight_params: Optional[Dict] = None) -> Any:
     """Factory function to get model instance with configured params."""
     if model_name not in MODEL_CONFIGS:
@@ -131,6 +166,82 @@ def train_model(
         return model
     except Exception as e:
         raise ModelTrainingError(f"Training failed for {model_name}: {e}")
+
+
+def tune_hyperparameters(
+    model_name: str,
+    X_train: pd.DataFrame,
+    y_train: pd.Series,
+    search_type: str = 'random',
+    n_iter: int = 30,
+    cv: int = 3,
+    scoring=None,
+    class_weight_params: Optional[Dict] = None,
+    random_state: int = 42,
+    n_jobs: int = -1,
+) -> Tuple[Any, Dict[str, Any]]:
+    """Tune hyperparameters for a model using cross-validated search.
+
+    Args:
+        model_name: Model key from MODEL_CONFIGS/MODEL_PARAM_GRIDS.
+        X_train: Training features.
+        y_train: Training labels.
+        search_type: 'grid' for exhaustive grid search, 'random' for randomized search.
+        n_iter: Number of parameter settings sampled (random search only).
+        cv: Number of cross-validation folds.
+        scoring: Scorer callable; defaults to PR-AUC.
+        class_weight_params: Class imbalance params passed to get_model.
+        random_state: Random seed for reproducibility.
+        n_jobs: Parallel jobs for cross-validation.
+
+    Returns:
+        (best_model, best_params) where best_model is the fitted estimator
+        with the best found hyperparameters and best_params is the param dict.
+    """
+    if model_name not in MODEL_PARAM_GRIDS:
+        raise ValueError(
+            f"No param grid defined for model: {model_name}. "
+            f"Available: {list(MODEL_PARAM_GRIDS.keys())}"
+        )
+
+    if scoring is None:
+        scoring = 'average_precision'
+
+    base_model = get_model(model_name, class_weight_params)
+    param_grid = MODEL_PARAM_GRIDS[model_name]
+
+    if search_type == 'grid':
+        search = GridSearchCV(
+            base_model,
+            param_grid,
+            cv=cv,
+            scoring=scoring,
+            n_jobs=n_jobs,
+            verbose=0,
+        )
+    elif search_type == 'random':
+        search = RandomizedSearchCV(
+            base_model,
+            param_grid,
+            n_iter=n_iter,
+            cv=cv,
+            scoring=scoring,
+            n_jobs=n_jobs,
+            verbose=0,
+            random_state=random_state,
+        )
+    else:
+        raise ValueError(f"Unknown search_type: {search_type}. Use 'grid' or 'random'.")
+
+    search.fit(X_train, y_train)
+
+    best_model = search.best_estimator_
+    best_params = search.best_params_
+
+    print(f"  Best {model_name} params: {best_params}")
+    print(f"  Best CV PR-AUC: {search.best_score_:.4f}")
+
+    return best_model, best_params
 
 
 def evaluate_model(
