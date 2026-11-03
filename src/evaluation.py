@@ -57,7 +57,17 @@ def compute_operational_metrics(
             fp = np.sum((y_pred_budget == 1) & (y_true == 0))
             metrics[f'fp_per_100k_at_budget_{alert_budget}'] = (fp / total_transactions) * 100_000
 
-    tn, fp, fn, tp = confusion_matrix(y_true, y_pred).ravel()
+    # Force a 2x2 confusion matrix so single-class windows (e.g. a fraud-free
+    # time split) still unpack cleanly instead of raising ValueError.
+    labels = [0, 1]
+    try:
+        tn, fp, fn, tp = confusion_matrix(y_true, y_pred, labels=labels).ravel()
+    except ValueError:
+        # Fallback: manually build the 2x2 counts for robustness.
+        tn = int(np.sum((y_true == 0) & (y_pred == 0)))
+        fp = int(np.sum((y_true == 0) & (y_pred == 1)))
+        fn = int(np.sum((y_true == 1) & (y_pred == 0)))
+        tp = int(np.sum((y_true == 1) & (y_pred == 1)))
     metrics['true_positives'] = int(tp)
     metrics['false_positives'] = int(fp)
     metrics['true_negatives'] = int(tn)
