@@ -50,6 +50,10 @@ if "dark_mode" not in st.session_state:
 if "prediction_history" not in st.session_state:
     st.session_state.prediction_history = []
 
+# Alert status state
+if "alert_status" not in st.session_state:
+    st.session_state.alert_status = load_alert_status()
+
 # Custom CSS (light + dark themes)
 st.markdown("""
 <style>
@@ -115,6 +119,40 @@ def load_reports():
         else:
             reports[name] = pd.DataFrame()
     return reports
+
+
+# ── Alert status persistence ──
+def load_alert_status():
+    """Load alert acknowledgment/resolution status from disk."""
+    if ALERT_STATUS_PATH.exists():
+        try:
+            with open(ALERT_STATUS_PATH) as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {}
+
+
+def save_alert_status(status_dict):
+    """Persist alert status to disk."""
+    try:
+        REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+        with open(ALERT_STATUS_PATH, 'w') as f:
+            json.dump(status_dict, f, indent=2)
+    except Exception as exc:
+        st.error(f"Failed to save alert status: {exc}")
+
+
+def alert_key(alert):
+    """Generate a stable key for an alert from its fields."""
+    alert_type = str(alert.get('type', ''))
+    column = str(alert.get('column', ''))
+    metric = str(alert.get('metric', ''))
+    try:
+        value = float(alert.get('value', 0))
+    except (TypeError, ValueError):
+        value = 0.0
+    return f"{alert_type}|{column}|{metric}|{value:.4f}"
 
 @st.cache_resource
 def load_model_and_data():
@@ -793,6 +831,18 @@ elif page == "📈 Drift Monitoring":
             score_count = sum(1 for a in alerts if "score_drift" in a.get("type", ""))
             st.metric("Score Drift", score_count)
 
+        # Status summary
+        col1, col2, col3, col4 = st.columns(4)
+        pending_live = sum(1 for a in alerts if st.session_state.alert_status.get(alert_key(a), "pending") == "pending")
+        acked_live = sum(1 for a in alerts if st.session_state.alert_status.get(alert_key(a), "pending") == "acknowledged")
+        resolved_live = sum(1 for a in alerts if st.session_state.alert_status.get(alert_key(a), "pending") == "resolved")
+        with col1:
+            st.metric("Pending", pending_live)
+        with col2:
+            st.metric("Acknowledged", acked_live)
+        with col3:
+            st.metric("Resolved", resolved_live)
+
         if alerts:
             st.subheader("🚨 Active Drift Alerts")
             for alert in alerts:
@@ -803,7 +853,25 @@ elif page == "📈 Drift Monitoring":
                     severity = "🟡 Medium"
                 else:
                     severity = "🟢 Low"
-                st.write(f"{severity} — {alert['type']}: {alert['column']} ({alert['metric']}={value:.4f})")
+                key = alert_key(alert)
+                current_status = st.session_state.alert_status.get(key, "pending")
+
+                col_a, col_b, col_c = st.columns([5, 1, 1])
+                with col_a:
+                    status_icon = {"pending": "⏳", "acknowledged": "✓", "resolved": "✅"}[current_status]
+                    st.write(f"{status_icon} {severity} — {alert['type']}: {alert['column']} ({alert['metric']}={value:.4f})")
+                with col_b:
+                    if current_status != "acknowledged":
+                        if st.button("✓ Ack", key=f"ack_live_{key}"):
+                            st.session_state.alert_status[key] = "acknowledged"
+                            save_alert_status(st.session_state.alert_status)
+                            st.rerun()
+                with col_c:
+                    if current_status != "resolved":
+                        if st.button("✅ Resolve", key=f"res_live_{key}"):
+                            st.session_state.alert_status[key] = "resolved"
+                            save_alert_status(st.session_state.alert_status)
+                            st.rerun()
 
     st.divider()
 
@@ -822,12 +890,66 @@ elif page == "📈 Drift Monitoring":
             score_alerts = alerts_df[alerts_df['type'] == 'score_drift'] if 'type' in alerts_df.columns else pd.DataFrame()
             st.metric("Score Drift Alerts", len(score_alerts))
 
-        # Alerts table
+        # Alerts table with management
         st.subheader("📋 Drift Alerts Log")
         if not alerts_df.empty:
-            # Add alert severity styling
-            display_df = alerts_df.copy()
-            st.dataframe(display_df, use_container_width=True, height=400)
+            # Status filter
+            col1, col2 = st.columns([1, 3])
+            with col1:
+                filter_status = st.selectbox(
+                    "Filter by status",
+                    ["All", "Pending", "Acknowledged", "Resolved"],
+                    key="drift_status_filter"
+                )
+
+            # Status summary
+            col1, col2, col3, col4 = st.columns(4)
+            pending_stored = sum(1 for _, r in alerts_df.iterrows() if st.session_state.alert_status.get(alert_key(r.to_dict()), "pending") == "pending")
+            acked_stored = sum(1 for _, r in alerts_df.iterrows() if st.session_state.alert_status.get(alert_key(r.to_dict()), "pending") == "acknowledged")
+            resolved_stored = sum(1 for _, r in alerts_df.iterrows() if st.session_state.alert_status.get(alert_key(r.to_dict()), "pending") == "resolved")
+            with col1:
+                st.metric("Pending", pending_stored)
+            with col2:
+                st.metric("Acknowledged", acked_stored)
+            with col3:
+                st.metric("Resolved", resolved_stored)
+
+            # Per-row alerts with actions
+            for _, row in alerts_df.iterrows():
+                alert = row.to_dict()
+                value = alert.get("value", 0)
+                try:
+                    value = float(value)
+                except (TypeError, ValueError):
+                    value = 0.0
+                if value > 0.3:
+                    severity = "🔴 High"
+                elif value > 0.2:
+                    severity = "🟡 Medium"
+                else:
+                    severity = "🟢 Low"
+                key = alert_key(alert)
+                current_status = st.session_state.alert_status.get(key, "pending")
+
+                if filter_status != "All" and current_status.title() != filter_status:
+                    continue
+
+                col_a, col_b, col_c = st.columns([5, 1, 1])
+                with col_a:
+                    status_icon = {"pending": "⏳", "acknowledged": "✓", "resolved": "✅"}[current_status]
+                    st.write(f"{status_icon} {severity} — {alert.get('type','')}: {alert.get('column','')} ({alert.get('metric','')}={value:.4f})")
+                with col_b:
+                    if current_status != "acknowledged":
+                        if st.button("✓ Ack", key=f"ack_stored_{key}"):
+                            st.session_state.alert_status[key] = "acknowledged"
+                            save_alert_status(st.session_state.alert_status)
+                            st.rerun()
+                with col_c:
+                    if current_status != "resolved":
+                        if st.button("✅ Resolve", key=f"res_stored_{key}"):
+                            st.session_state.alert_status[key] = "resolved"
+                            save_alert_status(st.session_state.alert_status)
+                            st.rerun()
 
             # Alert type breakdown
             if 'type' in alerts_df.columns:
