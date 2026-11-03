@@ -180,8 +180,8 @@ def prepare_features_target(
 
     # Encode categorical columns to integer codes so sklearn models can consume them.
     # Mirrors dashboard/app.py prepare_xy behavior.
-    for col in X.select_dtypes(include=['category']).columns:
-        X[col] = X[col].cat.codes
+    for col in X.select_dtypes(include=['category', 'object']).columns:
+        X[col] = X[col].astype('category').cat.codes
     X = X.fillna(-999)
     return X, y  # type: ignore[return-value]
 

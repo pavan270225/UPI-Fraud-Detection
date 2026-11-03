@@ -104,7 +104,7 @@ async def predict(request: Request) -> JSONResponse:
         )
 
     try:
-        model, _ = load_model_for_api(dataset, model_name)
+        model, metadata = load_model_for_api(dataset, model_name)
     except FileNotFoundError as exc:
         return JSONResponse({"error": str(exc)}, status_code=404)
 
@@ -121,6 +121,15 @@ async def predict(request: Request) -> JSONResponse:
 
         # Prepare features without target column (API scoring mode)
         X, _ = prepare_features_target(df, require_target=False)
+
+        # Reindex to match model's expected features, filling missing with -999
+        expected_features = None
+        if metadata and "feature_names" in metadata:
+            expected_features = list(metadata["feature_names"])
+        elif hasattr(model, "feature_names_in_"):
+            expected_features = list(model.feature_names_in_)
+        if expected_features:
+            X = X.reindex(columns=expected_features, fill_value=-999)
 
         # Get predictions
         scores = model.predict_proba(X)[:, 1]
