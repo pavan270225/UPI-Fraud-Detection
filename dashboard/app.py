@@ -22,6 +22,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from pathlib import Path
+from datetime import datetime
 import joblib
 import json
 import warnings
@@ -44,6 +45,10 @@ st.set_page_config(
 # Dark mode state
 if "dark_mode" not in st.session_state:
     st.session_state.dark_mode = False
+
+# Prediction history state
+if "prediction_history" not in st.session_state:
+    st.session_state.prediction_history = []
 
 # Custom CSS (light + dark themes)
 st.markdown("""
@@ -89,6 +94,7 @@ st.markdown("""
 DATA_ROOT = Path('../data')
 MODELS_DIR = Path('../models')
 REPORTS_DIR = Path('../reports')
+ALERT_STATUS_PATH = REPORTS_DIR / 'alert_status.json'
 
 @st.cache_data
 def load_reports():
@@ -169,7 +175,7 @@ page = st.sidebar.radio(
     "Navigate",
     ["📊 Overview", "🎯 Risk Scoring", "🤖 Model Comparison", "🚀 Pipeline Control",
      "🔍 SHAP Explanations", "📈 Drift Monitoring",
-     "⚙️ Retraining Strategies", "⏱️ Delayed Labels", "📋 Reports"]
+     "⚙️ Retraining Strategies", "⏱️ Delayed Labels", "📜 Prediction History", "📋 Reports"]
 )
 
 # Load reports
@@ -274,6 +280,33 @@ if page == "📊 Overview":
 elif page == "🎯 Risk Scoring":
     st.title("🎯 Real-time Risk Scoring")
 
+    # ── Model Upload ──
+    st.subheader("📤 Upload Custom Model")
+    uploaded_model = st.file_uploader(
+        "Upload a trained model (.joblib)",
+        type=["joblib"],
+        key="risk_model_upload"
+    )
+    if uploaded_model is not None:
+        try:
+            import tempfile, os
+            with tempfile.NamedTemporaryFile(suffix=".joblib", delete=False) as tmp:
+                tmp.write(uploaded_model.read())
+                tmp_path = tmp.name
+            uploaded_model_obj = joblib.load(tmp_path)
+            meta_path = tmp_path.replace(".joblib", ".json")
+            if os.path.exists(meta_path):
+                with open(meta_path) as f:
+                    model_meta = json.load(f)
+            model = uploaded_model_obj
+            st.success(f"✅ Model uploaded: {uploaded_model.name}")
+            if model_meta:
+                st.info(f"Model metrics: {model_meta.get('val_metrics', {})}")
+        except Exception as exc:
+            st.error(f"❌ Failed to load model: {exc}")
+
+    st.divider()
+
     if model is None:
         st.warning("Model not loaded. Please train models first using notebook 02_baselines.ipynb")
     else:
@@ -326,6 +359,21 @@ elif page == "🎯 Risk Scoring":
                 st.write(f"**Recall**: {recall:.4f}")
                 st.write(f"**F1**: {f1:.4f}")
                 st.write(f"**Alerts**: {tp + fp:,} / {len(y_test):,}")
+
+                # Save scoring session to prediction history
+                st.session_state.prediction_history.append({
+                    "timestamp": datetime.now().isoformat(),
+                    "model": model_meta.get("model", "uploaded"),
+                    "dataset": "ieee-cis",
+                    "n_predictions": int(len(scores)),
+                    "fraud_rate": float(y_test.mean()),
+                    "avg_score": float(scores.mean()),
+                    "max_score": float(scores.max()),
+                    "min_score": float(scores.min()),
+                    "threshold": float(threshold),
+                    "predicted_frauds": int(y_pred.sum()),
+                    "actual_frauds": int(y_test.sum()),
+                })
 
         except Exception as e:
             st.error(f"Error loading test data: {e}")
@@ -905,6 +953,132 @@ elif page == "⏱️ Delayed Labels":
     else:
         st.warning("No delayed labels results found. Run notebook 03_delayed_labels.ipynb first.")
         st.code("jupyter notebook notebooks/03_delayed_labels.ipynb")
+
+# ============================================================
+# PAGE: PREDICTION HISTORY
+# ============================================================
+elif page == "📜 Prediction History":
+    st.title("📜 Prediction History")
+
+    history = st.session_state.prediction_history
+
+    if not history:
+        st.info("No prediction sessions yet. Go to Risk Scoring to generate predictions.")
+    else:
+        # Convert to DataFrame
+        hist_df = pd.DataFrame(history)
+
+        # Summary metrics
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Total Sessions", len(hist_df))
+        with col2:
+            st.metric("Total Predictions", int(hist_df['n_predictions'].sum()))
+        with col3:
+            st.metric("Avg Fraud Rate", f"{hist_df['fraud_rate'].mean():.2%}")
+        with col4:
+            st.metric("Avg Risk Score", f"{hist_df['avg_score'].mean():.4f}")
+
+        st.divider()
+
+        # Filters
+        st.subheader("🔍 Filter History")
+        col1, col2 = st.columns(2)
+        with col1:
+            model_filter = st.selectbox(
+                "Model",
+                ["All"] + sorted(hist_df['model'].unique().tolist()),
+                key="ph_model_filter"
+            )
+        with col2:
+            date_filter = st.date_input(
+                "From date",
+                value=None,
+                key="ph_date_filter"
+            )
+
+        filtered_df = hist_df.copy()
+        if model_filter != "All":
+            filtered_df = filtered_df[filtered_df['model'] == model_filter]
+        if date_filter:
+            filtered_df = filtered_df[
+                pd.to_datetime(filtered_df['timestamp']).dt.date >= date_filter
+            ]
+
+        # History table
+        st.subheader("📋 Prediction Sessions")
+        display_cols = ['timestamp', 'model', 'dataset', 'n_predictions', 'fraud_rate',
+                        'avg_score', 'max_score', 'threshold', 'predicted_frauds', 'actual_frauds']
+        display_df = filtered_df[display_cols].copy()
+        display_df['timestamp'] = pd.to_datetime(display_df['timestamp']).dt.strftime('%Y-%m-%d %H:%M:%S')
+        display_df['fraud_rate'] = display_df['fraud_rate'].apply(lambda x: f"{x:.2%}")
+        display_df['avg_score'] = display_df['avg_score'].apply(lambda x: f"{x:.4f}")
+        display_df['max_score'] = display_df['max_score'].apply(lambda x: f"{x:.4f}")
+
+        st.dataframe(
+            display_df,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "timestamp": st.column_config.TextColumn("Timestamp"),
+                "model": st.column_config.TextColumn("Model"),
+                "dataset": st.column_config.TextColumn("Dataset"),
+                "n_predictions": st.column_config.NumberColumn("Predictions", format="%d"),
+                "fraud_rate": st.column_config.TextColumn("Actual Fraud Rate"),
+                "avg_score": st.column_config.TextColumn("Avg Score"),
+                "max_score": st.column_config.TextColumn("Max Score"),
+                "threshold": st.column_config.NumberColumn("Threshold", format="%.2f"),
+                "predicted_frauds": st.column_config.NumberColumn("Predicted Frauds", format="%d"),
+                "actual_frauds": st.column_config.NumberColumn("Actual Frauds", format="%d"),
+            }
+        )
+
+        # Score trend chart
+        st.subheader("📈 Risk Score Trend")
+        if len(filtered_df) > 1:
+            trend_df = filtered_df.copy()
+            trend_df['timestamp'] = pd.to_datetime(trend_df['timestamp'])
+            trend_df = trend_df.sort_values('timestamp')
+
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(
+                x=trend_df['timestamp'], y=trend_df['avg_score'],
+                mode='lines+markers', name='Avg Risk Score',
+                line=dict(color='blue')
+            ))
+            fig.add_trace(go.Scatter(
+                x=trend_df['timestamp'], y=trend_df['max_score'],
+                mode='lines+markers', name='Max Risk Score',
+                line=dict(color='red')
+            ))
+            fig.update_layout(
+                title='Average and Max Risk Score Over Sessions',
+                xaxis_title='Session Time',
+                yaxis_title='Risk Score',
+                hovermode='x unified'
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("Run more scoring sessions to see the trend chart.")
+
+        # Actions
+        st.divider()
+        st.subheader("⚙️ Actions")
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("🗑️ Clear History", key="ph_clear"):
+                st.session_state.prediction_history = []
+                st.success("Prediction history cleared.")
+                st.rerun()
+        with col2:
+            csv = hist_df.to_csv(index=False)
+            st.download_button(
+                "📥 Export CSV",
+                csv,
+                file_name="prediction_history.csv",
+                mime="text/csv",
+                key="ph_export"
+            )
 
 # ============================================================
 # PAGE: REPORTS
