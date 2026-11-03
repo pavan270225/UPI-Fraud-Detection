@@ -3,7 +3,13 @@
 import numpy as np
 import pytest
 
-from src.drift_detection import kolmogorov_smirnov_test, population_stability_index
+from src.drift_detection import (
+    kolmogorov_smirnov_test,
+    population_stability_index,
+    summarize_drift_alerts,
+    generate_drift_report,
+    should_retrain_from_drift,
+)
 
 
 def test_psi_identical_distributions_is_zero():
