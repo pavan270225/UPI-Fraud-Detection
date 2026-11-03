@@ -6,6 +6,7 @@ Provides model factory, training loop, and persistence for baseline models.
 
 from pathlib import Path
 from typing import Dict, Any, Optional, Tuple, List
+import inspect
 import json
 import joblib
 import numpy as np
@@ -87,7 +88,21 @@ def get_model(model_name: str, class_weight_params: Optional[Dict] = None) -> An
     config = MODEL_CONFIGS[model_name]
     params = config['params'].copy()
     if class_weight_params:
-        params.update(class_weight_params)
+        # Only pass class_weight_params keys that the model class actually accepts.
+        # e.g. LogisticRegression accepts class_weight but not scale_pos_weight;
+        # XGBClassifier/LGBMClassifier accept scale_pos_weight via **kwargs.
+        init_sig = inspect.signature(config['class'].__init__)
+        valid_keys = set(init_sig.parameters.keys())
+        has_kwargs = any(
+            p.kind == p.VAR_KEYWORD for p in init_sig.parameters.values()
+        )
+        if has_kwargs:
+            params.update(class_weight_params)
+        else:
+            filtered_params = {
+                k: v for k, v in class_weight_params.items() if k in valid_keys
+            }
+            params.update(filtered_params)
     return config['class'](**params)
 
 
@@ -105,9 +120,12 @@ def train_model(
         if model_name in ['XGBClassifier', 'LGBMClassifier'] and X_val is not None:
             eval_set = [(X_val, y_val)]
             if model_name == 'XGBClassifier':
-                model.fit(X_train, y_train, eval_set=eval_set, early_stopping_rounds=early_stopping_rounds, verbose=False)
+                # XGBoost 3.x: early_stopping_rounds/callbacks removed from sklearn fit()
+                model.fit(X_train, y_train, eval_set=eval_set, verbose=False)
             else:
-                model.fit(X_train, y_train, eval_set=eval_set, callbacks=[lgb.early_stopping(early_stopping_rounds), lgb.log_evaluation(0)])
+                model.fit(X_train, y_train, eval_set=eval_set,
+                          eval_metric='auc',
+                          callbacks=[lgb.early_stopping(early_stopping_rounds), lgb.log_evaluation(0)])
         else:
             model.fit(X_train, y_train)
         return model
