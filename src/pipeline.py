@@ -47,6 +47,11 @@ from drift_detection import (  # noqa: E402
 from shap_explainer import (  # noqa: E402
     SHAPExplainer,
 )
+from retraining import (  # noqa: E402
+    DriftTriggeredStrategy,
+    RetrainingOrchestrator,
+    create_retraining_orchestrator,
+)
 from evaluation import (  # noqa: E402
     compute_operational_metrics,
     generate_evaluation_report,
@@ -127,8 +132,10 @@ def stage_train(
     test_ratio: float = 0.15,
     class_weight_method: str = "class_weight",
     save: bool = True,
+    quiet: bool = False,
 ) -> Dict:
     """Train model(s) on a dataset. If model_name is None, trains all baselines."""
+    log = print if not quiet else lambda *a, **k: None
     df, time_col, target_col = load_dataset(dataset)
     train_df, val_df, test_df = split_data(df, time_col, train_ratio, val_ratio, test_ratio)
 
@@ -153,7 +160,7 @@ def stage_train(
     models_to_train = [model_name] if model_name else list(MODEL_CONFIGS.keys())
 
     for name in models_to_train:
-        print(f"\n=== Training {name} on {dataset} ===")
+        log(f"\n=== Training {name} on {dataset} ===")
         try:
             model = get_model(name, class_weight_params)
             model = train_model(model, X_train, y_train, X_val, y_val)
@@ -164,8 +171,8 @@ def stage_train(
                 "val_metrics": val_metrics,
                 "test_metrics": test_metrics,
             }
-            print(f"  Val   PR-AUC: {val_metrics['pr_auc']:.4f}  P@100: {val_metrics.get('precision_at_100', 0):.4f}")
-            print(f"  Test  PR-AUC: {test_metrics['pr_auc']:.4f}  P@100: {test_metrics.get('precision_at_100', 0):.4f}")
+            log(f"  Val   PR-AUC: {val_metrics['pr_auc']:.4f}  P@100: {val_metrics.get('precision_at_100', 0):.4f}")
+            log(f"  Test  PR-AUC: {test_metrics['pr_auc']:.4f}  P@100: {test_metrics.get('precision_at_100', 0):.4f}")
 
             if save:
                 model_path = MODELS_DIR / f"{dataset}_{name}.joblib"
@@ -179,10 +186,10 @@ def stage_train(
                     "feature_names": X_train.columns.tolist(),
                 }
                 save_model(model, model_path, metadata=meta)
-                print(f"  Saved model -> {model_path}")
+                log(f"  Saved model -> {model_path}")
 
         except (ModelTrainingError, Exception) as exc:  # noqa: BLE001
-            print(f"  ERROR training {name}: {exc}")
+            log(f"  ERROR training {name}: {exc}")
             results["models"][name] = {"error": str(exc)}
 
     return results
@@ -349,6 +356,90 @@ def stage_shap(
     return result
 
 
+def stage_retrain(
+    dataset: str,
+    model_name: str = "lightgbm",
+    train_ratio: float = 0.7,
+    val_ratio: float = 0.15,
+    test_ratio: float = 0.15,
+    psi_threshold: float = 0.2,
+    ks_threshold: float = 0.05,
+    force: bool = False,
+    quiet: bool = False,
+) -> Dict:
+    """Drift-triggered retraining: train baseline, check drift, retrain if triggered.
+
+    Trains an initial model on the train split, runs PSI/KS drift detection
+    between train (reference) and test (current), and retrains if drift exceeds
+    thresholds or --force is passed. Saves the resulting model.
+    """
+    log = print if not quiet else lambda *a, **k: None
+
+    df, time_col, target_col = load_dataset(dataset)
+    train_df, val_df, test_df = split_data(df, time_col, train_ratio, val_ratio, test_ratio)
+
+    X_train, y_train = prepare_features_target(train_df, target_col=target_col)
+    X_val, y_val = prepare_features_target(val_df, target_col=target_col)
+    X_test, y_test = prepare_features_target(test_df, target_col=target_col)
+
+    class_weight_params = handle_class_imbalance(X_train, y_train, method="class_weight")
+
+    log(f"\n=== Retraining {model_name} on {dataset} ===")
+    model = get_model(model_name, class_weight_params)
+    model = train_model(model, X_train, y_train, X_val, y_val)
+    val_metrics = evaluate_model(model, X_val, y_val)
+    test_metrics = evaluate_model(model, X_test, y_test)
+
+    # Drift detection: train (reference) vs test (current)
+    feature_cols = X_train.columns.tolist()
+    monitor = DriftMonitor(psi_threshold=psi_threshold, ks_threshold=ks_threshold)
+    monitor.fit(train_df, feature_cols, score_col=None)
+    drift_result = monitor.check(test_df, timestamp="retrain_check")
+
+    alerts = drift_result.get("alerts", [])
+    drift_detected = len(alerts) > 0
+
+    retrained = False
+    trigger: Optional[str] = None
+    if force or drift_detected:
+        trigger = "force" if force else "drift_detected"
+        log(f"  Retraining triggered by: {trigger}")
+        model = train_model(model, X_train, y_train, X_val, y_val)
+        val_metrics = evaluate_model(model, X_val, y_val)
+        test_metrics = evaluate_model(model, X_test, y_test)
+        retrained = True
+    else:
+        log("  No drift detected — skipping retrain.")
+
+    suffix = "_retrained" if retrained else ""
+    model_path = MODELS_DIR / f"{dataset}_{model_name}{suffix}.joblib"
+    meta = {
+        "dataset": dataset,
+        "model": model_name,
+        "retrained": retrained,
+        "trigger": trigger,
+        "val_metrics": val_metrics,
+        "test_metrics": test_metrics,
+        "drift_alerts": alerts,
+    }
+    save_model(model, model_path, metadata=meta)
+
+    log(f"  Retrained: {retrained}")
+    log(f"  Val PR-AUC: {val_metrics['pr_auc']:.4f}")
+    log(f"  Test PR-AUC: {test_metrics['pr_auc']:.4f}")
+    log(f"  Saved model -> {model_path}")
+
+    return {
+        "dataset": dataset,
+        "model": model_name,
+        "retrained": retrained,
+        "trigger": trigger,
+        "val_metrics": val_metrics,
+        "test_metrics": test_metrics,
+        "drift_alerts": alerts,
+    }
+
+
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="UPI Fraud Detection end-to-end pipeline",
@@ -359,6 +450,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default="ieee-cis",
         help="Dataset to run against",
     )
+    parser.add_argument(
+        "--quiet",
+        action="store_true",
+        help="Suppress non-essential output (CI-friendly)",
+    )
 
     sub = parser.add_subparsers(dest="stage", required=True)
 
@@ -366,6 +462,9 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p_train.add_argument("--model", choices=list(MODEL_CONFIGS.keys()), default=None,
                          help="Single model to train (default: all)")
     p_train.add_argument("--no-save", action="store_true", help="Do not persist models")
+    p_train.add_argument("--train-ratio", type=float, default=0.7, help="Train split ratio")
+    p_train.add_argument("--val-ratio", type=float, default=0.15, help="Validation split ratio")
+    p_train.add_argument("--test-ratio", type=float, default=0.15, help="Test split ratio")
 
     p_eval = sub.add_parser("evaluate", help="Evaluate a saved model on test split")
     p_eval.add_argument("--model", required=True, help="Model name (e.g. lightgbm)")
@@ -382,9 +481,25 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p_shap.add_argument("--max-background", type=int, default=500)
     p_shap.add_argument("--max-samples", type=int, default=1000)
 
+    p_retrain = sub.add_parser("retrain", help="Drift-triggered retraining")
+    p_retrain.add_argument("--model", choices=list(MODEL_CONFIGS.keys()), default="lightgbm",
+                           help="Model to retrain")
+    p_retrain.add_argument("--train-ratio", type=float, default=0.7, help="Train split ratio")
+    p_retrain.add_argument("--val-ratio", type=float, default=0.15, help="Validation split ratio")
+    p_retrain.add_argument("--test-ratio", type=float, default=0.15, help="Test split ratio")
+    p_retrain.add_argument("--psi-threshold", type=float, default=0.2, help="PSI drift threshold")
+    p_retrain.add_argument("--ks-threshold", type=float, default=0.05, help="KS drift threshold")
+    p_retrain.add_argument("--force", action="store_true", help="Force retrain even without drift")
+
     p_all = sub.add_parser("run-all", help="Run full pipeline: train -> evaluate -> drift -> shap")
     p_all.add_argument("--model", choices=list(MODEL_CONFIGS.keys()), default="lightgbm",
                        help="Primary model for evaluate/shap stages")
+    p_all.add_argument("--train-ratio", type=float, default=0.7, help="Train split ratio")
+    p_all.add_argument("--val-ratio", type=float, default=0.15, help="Validation split ratio")
+    p_all.add_argument("--test-ratio", type=float, default=0.15, help="Test split ratio")
+    p_all.add_argument("--psi-threshold", type=float, default=0.2, help="PSI drift threshold")
+    p_all.add_argument("--ks-threshold", type=float, default=0.05, help="KS drift threshold")
+    p_all.add_argument("--force-retrain", action="store_true", help="Force retrain even without drift")
 
     return parser
 
@@ -400,7 +515,23 @@ def main(argv: Optional[list] = None) -> int:
             stage_train(
                 dataset=args.dataset,
                 model_name=args.model,
+                train_ratio=args.train_ratio,
+                val_ratio=args.val_ratio,
+                test_ratio=args.test_ratio,
                 save=not args.no_save,
+                quiet=args.quiet,
+            )
+        elif args.stage == "retrain":
+            stage_retrain(
+                dataset=args.dataset,
+                model_name=args.model,
+                train_ratio=args.train_ratio,
+                val_ratio=args.val_ratio,
+                test_ratio=args.test_ratio,
+                psi_threshold=args.psi_threshold,
+                ks_threshold=args.ks_threshold,
+                force=args.force,
+                quiet=args.quiet,
             )
         elif args.stage == "evaluate":
             stage_evaluate(
@@ -424,9 +555,28 @@ def main(argv: Optional[list] = None) -> int:
                 max_samples=args.max_samples,
             )
         elif args.stage == "run-all":
-            stage_train(dataset=args.dataset, model_name=args.model, save=True)
+            stage_train(
+                dataset=args.dataset,
+                model_name=args.model,
+                train_ratio=args.train_ratio,
+                val_ratio=args.val_ratio,
+                test_ratio=args.test_ratio,
+                save=True,
+                quiet=args.quiet,
+            )
             stage_evaluate(dataset=args.dataset, model_name=args.model)
             stage_drift(dataset=args.dataset)
+            stage_retrain(
+                dataset=args.dataset,
+                model_name=args.model,
+                train_ratio=args.train_ratio,
+                val_ratio=args.val_ratio,
+                test_ratio=args.test_ratio,
+                psi_threshold=args.psi_threshold,
+                ks_threshold=args.ks_threshold,
+                force=args.force_retrain,
+                quiet=args.quiet,
+            )
             stage_shap(dataset=args.dataset, model_name=args.model)
         else:
             parser.print_help()

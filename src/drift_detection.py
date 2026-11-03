@@ -398,6 +398,126 @@ def detect_drift_rolling(
     return pd.DataFrame(results)
 
 
+def summarize_drift_alerts(drift_results: list) -> Dict:
+    """Aggregate drift alerts across multiple check results.
+
+    Args:
+        drift_results: List of drift result dicts from DriftMonitor.check()
+
+    Returns:
+        Dict with alert counts, most alerted features, and severity summary.
+    """
+    all_alerts = []
+    for result in drift_results:
+        if isinstance(result, dict):
+            all_alerts.extend(result.get("alerts", []))
+
+    if not all_alerts:
+        return {
+            "total_alerts": 0,
+            "feature_drift_alerts": 0,
+            "score_drift_alerts": 0,
+            "most_alerted_features": {},
+            "alert_types": {},
+        }
+
+    feature_alerts = [a for a in all_alerts if a.get("type") == "feature_drift"]
+    score_alerts = [a for a in all_alerts if "score_drift" in a.get("type", "")]
+
+    feature_counts: Dict[str, int] = {}
+    for a in feature_alerts:
+        feature_counts[a.get("column", "unknown")] = (
+            feature_counts.get(a.get("column", "unknown"), 0) + 1
+        )
+
+    type_counts: Dict[str, int] = {}
+    for a in all_alerts:
+        type_counts[a.get("type", "unknown")] = type_counts.get(a.get("type", "unknown"), 0) + 1
+
+    most_alerted = dict(sorted(feature_counts.items(), key=lambda x: x[1], reverse=True))
+
+    return {
+        "total_alerts": len(all_alerts),
+        "feature_drift_alerts": len(feature_alerts),
+        "score_drift_alerts": len(score_alerts),
+        "most_alerted_features": most_alerted,
+        "alert_types": type_counts,
+    }
+
+
+def generate_drift_report(
+    drift_results: list,
+    dataset_name: str = "dataset",
+) -> str:
+    """Generate a human-readable drift monitoring report.
+
+    Args:
+        drift_results: List of drift result dicts from DriftMonitor.check() or
+                       detect_drift_rolling().
+        dataset_name: Name of the dataset being monitored.
+
+    Returns:
+        Formatted report string.
+    """
+    summary = summarize_drift_alerts(drift_results)
+
+    lines = [
+        "=" * 60,
+        f"DRIFT MONITORING REPORT: {dataset_name}",
+        "=" * 60,
+        "",
+        "SUMMARY:",
+        f"  Total alerts: {summary['total_alerts']}",
+        f"  Feature drift alerts: {summary['feature_drift_alerts']}",
+        f"  Score drift alerts: {summary['score_drift_alerts']}",
+    ]
+
+    if summary["most_alerted_features"]:
+        lines.extend(["", "MOST ALERTED FEATURES:"])
+        for feat, count in list(summary["most_alerted_features"].items())[:10]:
+            lines.append(f"  {feat}: {count} alert(s)")
+
+    if summary["alert_types"]:
+        lines.extend(["", "ALERT TYPE BREAKDOWN:"])
+        for alert_type, count in summary["alert_types"].items():
+            lines.append(f"  {alert_type}: {count}")
+
+    lines.extend(["", "=" * 60])
+    return "\n".join(lines)
+
+
+def should_retrain_from_drift(
+    drift_result: Dict,
+    psi_threshold: float = 0.2,
+    ks_threshold: float = 0.05,
+) -> Tuple[bool, str]:
+    """Determine if retraining should be triggered from a drift result.
+
+    Args:
+        drift_result: A single drift check result dict.
+        psi_threshold: PSI threshold for triggering retraining.
+        ks_threshold: KS threshold for triggering retraining.
+
+    Returns:
+        (should_retrain, trigger_reason)
+    """
+    if not drift_result:
+        return False, "no_drift_result"
+
+    alerts = drift_result.get("alerts", [])
+    for alert in alerts:
+        metric = alert.get("metric", "")
+        value = alert.get("value", 0)
+        threshold = alert.get("threshold", 0)
+
+        if metric == "PSI" and value > psi_threshold:
+            return True, f"drift_psi (PSI={value:.4f} > {threshold})"
+        if metric == "KS" and value > ks_threshold:
+            return True, f"drift_ks (KS={value:.4f} > {threshold})"
+
+    return False, "no_drift_trigger"
+
+
 if __name__ == '__main__':
     # Quick test
     np.random.seed(42)
