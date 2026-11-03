@@ -9,11 +9,14 @@ Implements three retraining strategies:
 
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Callable
+import json
 import numpy as np
 import pandas as pd
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
 @dataclass
@@ -37,6 +40,18 @@ class RetrainingEvent:
     train_samples: int
     val_metrics: Dict[str, float]
     previous_model_age_days: int
+
+
+@dataclass
+class ModelVersion:
+    """Record of a saved model version."""
+    version_id: str
+    timestamp: str
+    model_name: str
+    trigger: str
+    metrics: Dict[str, float]
+    file_path: str
+    is_active: bool = False
 
 
 class RetrainingStrategy(ABC):
@@ -133,6 +148,11 @@ class RetrainingOrchestrator:
         self.current_model = None
         self.current_model_name = None
         self.last_retrain_day = None
+        # Model versioning
+        self.models_dir: Path = PROJECT_ROOT / "models" / "versions"
+        self.versions: List[ModelVersion] = []
+        self.active_version_id: Optional[str] = None
+        self._load_version_registry()
 
     def add_strategy(self, name: str, strategy: RetrainingStrategy):
         """Register a retraining strategy."""
@@ -217,12 +237,47 @@ class RetrainingOrchestrator:
         )
         self.retraining_history.append(event)
 
+        # Save versioned model to disk
+        from models import save_model as _save_model
+
+        self.models_dir.mkdir(parents=True, exist_ok=True)
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        version_id = f"{model_name}_{ts}"
+        model_path = self.models_dir / f"{version_id}.joblib"
+        version_metadata = {
+            "version_id": version_id,
+            "timestamp": event.timestamp,
+            "model_name": model_name,
+            "trigger": trigger,
+            "metrics": val_metrics,
+            "train_samples": len(X_train),
+            "previous_model_age_days": event.previous_model_age_days,
+        }
+        _save_model(new_model, model_path, metadata=version_metadata)
+
+        # Register version
+        for v in self.versions:
+            v.is_active = False
+        new_version = ModelVersion(
+            version_id=version_id,
+            timestamp=event.timestamp,
+            model_name=model_name,
+            trigger=trigger,
+            metrics=val_metrics,
+            file_path=str(model_path),
+            is_active=True,
+        )
+        self.versions.append(new_version)
+        self.active_version_id = version_id
+        self._save_version_registry()
+
         # Update state
         self.current_model = new_model
         self.current_model_name = model_name
         self.last_retrain_day = current_day
 
         print(f"  Retrained {model_name}: PR-AUC={val_metrics['pr_auc']:.4f}, P@100={val_metrics.get('precision_at_100', 0):.4f}")
+        print(f"  Saved version {version_id} -> {model_path}")
 
         return new_model
 
@@ -245,6 +300,128 @@ class RetrainingOrchestrator:
             records.append(record)
 
         return pd.DataFrame(records)
+
+    # --- Model versioning / rollback ---
+
+    def _registry_path(self) -> Path:
+        """Return the path to the version registry JSON file."""
+        return self.models_dir / "versions.json"
+
+    def _save_version_registry(self) -> None:
+        """Persist the version registry to disk."""
+        self.models_dir.mkdir(parents=True, exist_ok=True)
+        records = []
+        for v in self.versions:
+            records.append(
+                {
+                    "version_id": v.version_id,
+                    "timestamp": v.timestamp,
+                    "model_name": v.model_name,
+                    "trigger": v.trigger,
+                    "metrics": v.metrics,
+                    "file_path": v.file_path,
+                    "is_active": v.is_active,
+                }
+            )
+        with open(self._registry_path(), "w") as f:
+            json.dump(
+                {"active_version_id": self.active_version_id, "versions": records},
+                f,
+                indent=2,
+                default=str,
+            )
+
+    def _load_version_registry(self) -> None:
+        """Load the version registry from disk if it exists."""
+        reg_path = self._registry_path()
+        if not reg_path.exists():
+            return
+        try:
+            with open(reg_path) as f:
+                data = json.load(f)
+            self.active_version_id = data.get("active_version_id")
+            for v in data.get("versions", []):
+                self.versions.append(
+                    ModelVersion(
+                        version_id=v["version_id"],
+                        timestamp=v["timestamp"],
+                        model_name=v["model_name"],
+                        trigger=v["trigger"],
+                        metrics=v.get("metrics", {}),
+                        file_path=v["file_path"],
+                        is_active=v.get("is_active", False),
+                    )
+                )
+        except Exception:  # noqa: BLE001
+            # If the registry is corrupted, start fresh rather than crash.
+            self.versions = []
+            self.active_version_id = None
+
+    def list_versions(self) -> List[ModelVersion]:
+        """Return all saved model versions, newest first."""
+        return sorted(self.versions, key=lambda v: v.timestamp, reverse=True)
+
+    def get_active_version(self) -> Optional[ModelVersion]:
+        """Return the currently active model version, or None."""
+        if self.active_version_id is None:
+            return None
+        for v in self.versions:
+            if v.version_id == self.active_version_id:
+                return v
+        return None
+
+    def get_version(self, version_id: str) -> Optional[ModelVersion]:
+        """Return a specific model version by ID, or None if not found."""
+        for v in self.versions:
+            if v.version_id == version_id:
+                return v
+        return None
+
+    def rollback(self, version_id: str) -> Any:
+        """
+        Roll back to a previous model version.
+
+        Sets the specified version as active, loads its model from disk,
+        and updates orchestrator state. Returns the loaded model.
+
+        Args:
+            version_id: The version ID to roll back to.
+
+        Returns:
+            The rolled-back model object.
+
+        Raises:
+            ValueError: If the version ID is not found.
+            FileNotFoundError: If the model file for the version is missing.
+        """
+        from models import load_model as _load_model
+
+        target = None
+        for v in self.versions:
+            if v.version_id == version_id:
+                target = v
+                break
+        if target is None:
+            raise ValueError(f"Model version not found: {version_id}")
+
+        model_path = Path(target.file_path)
+        if not model_path.exists():
+            raise FileNotFoundError(f"Model file not found: {model_path}")
+
+        # Deactivate all versions, activate the target, persist registry
+        for v in self.versions:
+            v.is_active = False
+        target.is_active = True
+        self.active_version_id = version_id
+        self._save_version_registry()
+
+        # Load the model
+        model, _ = _load_model(model_path)
+        self.current_model = model
+        self.current_model_name = target.model_name
+
+        print(f"  Rolled back to version {version_id} ({target.model_name})")
+        return model
 
     def compare_strategies(
         self,
