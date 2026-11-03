@@ -1,0 +1,40 @@
+# UPI Fraud Detection Pipeline Configuration
+# Override any CLI argument default by editing this file.
+# CLI flags always take precedence over config values.
+
+dataset: ieee-cis
+quiet: false
+
+train:
+  model: lightgbm
+  train_ratio: 0.7
+  val_ratio: 0.15
+  test_ratio: 0.15
+  save: true
+  class_weight_method: class_weight
+
+drift:
+  ref_days: 7
+  cur_days: 7
+  score_col: null
+
+retrain:
+  model: lightgbm
+  train_ratio: 0.7
+  val_ratio: 0.15
+  test_ratio: 0.15
+  psi_threshold: 0.2
+  ks_threshold: 0.05
+  force: false
+
+evaluate:
+  model: lightgbm
+
+shap:
+  model: lightgbm
+  max_background: 500
+  max_samples: 1000
+
+run_all:
+  model: lightgbm
+  force_retrain: false

@@ -21,6 +21,7 @@ from typing import Dict, Optional, Tuple
 import joblib
 import numpy as np
 import pandas as pd
+import yaml
 
 # Ensure `src` is importable when run as a script.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -93,6 +94,19 @@ def ensure_dirs() -> None:
     """Create output directories if missing."""
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def load_config(config_path: Optional[Path] = None) -> Dict:
+    """Load pipeline configuration from a YAML file.
+
+    Returns an empty dict if the file does not exist.
+    """
+    if config_path is None:
+        config_path = PROJECT_ROOT / "config.yaml"
+    if config_path.exists():
+        with open(config_path) as f:
+            return yaml.safe_load(f) or {}
+    return {}
 
 
 def load_dataset(dataset: str) -> Tuple[pd.DataFrame, str, str]:
@@ -440,72 +454,92 @@ def stage_retrain(
     }
 
 
-def build_arg_parser() -> argparse.ArgumentParser:
+def build_arg_parser(config: Optional[Dict] = None) -> argparse.ArgumentParser:
+    config = config or {}
+    train_cfg = config.get("train", {})
+    drift_cfg = config.get("drift", {})
+    retrain_cfg = config.get("retrain", {})
+    shap_cfg = config.get("shap", {})
+    run_all_cfg = config.get("run_all", {})
+
     parser = argparse.ArgumentParser(
         description="UPI Fraud Detection end-to-end pipeline",
     )
     parser.add_argument(
+        "--config",
+        type=Path,
+        default=config.get("config_file", None),
+        help="Path to YAML config file (default: config.yaml)",
+    )
+    parser.add_argument(
         "--dataset",
         choices=list(DATASET_SPECS.keys()),
-        default="ieee-cis",
+        default=config.get("dataset", "ieee-cis"),
         help="Dataset to run against",
     )
     parser.add_argument(
         "--quiet",
         action="store_true",
+        default=config.get("quiet", False),
         help="Suppress non-essential output (CI-friendly)",
     )
 
     sub = parser.add_subparsers(dest="stage", required=True)
 
     p_train = sub.add_parser("train", help="Train baseline model(s)")
-    p_train.add_argument("--model", choices=list(MODEL_CONFIGS.keys()), default=None,
+    p_train.add_argument("--model", choices=list(MODEL_CONFIGS.keys()), default=train_cfg.get("model", None),
                          help="Single model to train (default: all)")
     p_train.add_argument("--no-save", action="store_true", help="Do not persist models")
-    p_train.add_argument("--train-ratio", type=float, default=0.7, help="Train split ratio")
-    p_train.add_argument("--val-ratio", type=float, default=0.15, help="Validation split ratio")
-    p_train.add_argument("--test-ratio", type=float, default=0.15, help="Test split ratio")
+    p_train.add_argument("--train-ratio", type=float, default=train_cfg.get("train_ratio", 0.7), help="Train split ratio")
+    p_train.add_argument("--val-ratio", type=float, default=train_cfg.get("val_ratio", 0.15), help="Validation split ratio")
+    p_train.add_argument("--test-ratio", type=float, default=train_cfg.get("test_ratio", 0.15), help="Test split ratio")
 
     p_eval = sub.add_parser("evaluate", help="Evaluate a saved model on test split")
     p_eval.add_argument("--model", required=True, help="Model name (e.g. lightgbm)")
     p_eval.add_argument("--model-path", type=Path, default=None, help="Path to .joblib model")
 
     p_drift = sub.add_parser("drift", help="Run PSI/KS drift detection")
-    p_drift.add_argument("--ref-days", type=int, default=7, help="Reference window days")
-    p_drift.add_argument("--cur-days", type=int, default=7, help="Current window days")
-    p_drift.add_argument("--score-col", default=None, help="Optional score column name")
+    p_drift.add_argument("--ref-days", type=int, default=drift_cfg.get("ref_days", 7), help="Reference window days")
+    p_drift.add_argument("--cur-days", type=int, default=drift_cfg.get("cur_days", 7), help="Current window days")
+    p_drift.add_argument("--score-col", default=drift_cfg.get("score_col", None), help="Optional score column name")
 
     p_shap = sub.add_parser("shap", help="SHAP global importance + instance explanation")
     p_shap.add_argument("--model", required=True, help="Model name")
     p_shap.add_argument("--model-path", type=Path, default=None)
-    p_shap.add_argument("--max-background", type=int, default=500)
-    p_shap.add_argument("--max-samples", type=int, default=1000)
+    p_shap.add_argument("--max-background", type=int, default=shap_cfg.get("max_background", 500))
+    p_shap.add_argument("--max-samples", type=int, default=shap_cfg.get("max_samples", 1000))
 
     p_retrain = sub.add_parser("retrain", help="Drift-triggered retraining")
-    p_retrain.add_argument("--model", choices=list(MODEL_CONFIGS.keys()), default="lightgbm",
+    p_retrain.add_argument("--model", choices=list(MODEL_CONFIGS.keys()), default=retrain_cfg.get("model", "lightgbm"),
                            help="Model to retrain")
-    p_retrain.add_argument("--train-ratio", type=float, default=0.7, help="Train split ratio")
-    p_retrain.add_argument("--val-ratio", type=float, default=0.15, help="Validation split ratio")
-    p_retrain.add_argument("--test-ratio", type=float, default=0.15, help="Test split ratio")
-    p_retrain.add_argument("--psi-threshold", type=float, default=0.2, help="PSI drift threshold")
-    p_retrain.add_argument("--ks-threshold", type=float, default=0.05, help="KS drift threshold")
-    p_retrain.add_argument("--force", action="store_true", help="Force retrain even without drift")
+    p_retrain.add_argument("--train-ratio", type=float, default=retrain_cfg.get("train_ratio", 0.7), help="Train split ratio")
+    p_retrain.add_argument("--val-ratio", type=float, default=retrain_cfg.get("val_ratio", 0.15), help="Validation split ratio")
+    p_retrain.add_argument("--test-ratio", type=float, default=retrain_cfg.get("test_ratio", 0.15), help="Test split ratio")
+    p_retrain.add_argument("--psi-threshold", type=float, default=retrain_cfg.get("psi_threshold", 0.2), help="PSI drift threshold")
+    p_retrain.add_argument("--ks-threshold", type=float, default=retrain_cfg.get("ks_threshold", 0.05), help="KS drift threshold")
+    p_retrain.add_argument("--force", action="store_true", default=retrain_cfg.get("force", False), help="Force retrain even without drift")
 
     p_all = sub.add_parser("run-all", help="Run full pipeline: train -> evaluate -> drift -> shap")
-    p_all.add_argument("--model", choices=list(MODEL_CONFIGS.keys()), default="lightgbm",
+    p_all.add_argument("--model", choices=list(MODEL_CONFIGS.keys()), default=run_all_cfg.get("model", "lightgbm"),
                        help="Primary model for evaluate/shap stages")
-    p_all.add_argument("--train-ratio", type=float, default=0.7, help="Train split ratio")
-    p_all.add_argument("--val-ratio", type=float, default=0.15, help="Validation split ratio")
-    p_all.add_argument("--test-ratio", type=float, default=0.15, help="Test split ratio")
-    p_all.add_argument("--psi-threshold", type=float, default=0.2, help="PSI drift threshold")
-    p_all.add_argument("--ks-threshold", type=float, default=0.05, help="KS drift threshold")
-    p_all.add_argument("--force-retrain", action="store_true", help="Force retrain even without drift")
+    p_all.add_argument("--train-ratio", type=float, default=run_all_cfg.get("train_ratio", 0.7), help="Train split ratio")
+    p_all.add_argument("--val-ratio", type=float, default=run_all_cfg.get("val_ratio", 0.15), help="Validation split ratio")
+    p_all.add_argument("--test-ratio", type=float, default=run_all_cfg.get("test_ratio", 0.15), help="Test split ratio")
+    p_all.add_argument("--psi-threshold", type=float, default=run_all_cfg.get("psi_threshold", 0.2), help="PSI drift threshold")
+    p_all.add_argument("--ks-threshold", type=float, default=run_all_cfg.get("ks_threshold", 0.05), help="KS drift threshold")
+    p_all.add_argument("--force-retrain", action="store_true", default=run_all_cfg.get("force_retrain", False), help="Force retrain even without drift")
 
     return parser
 
 
 def main(argv: Optional[list] = None) -> int:
-    parser = build_arg_parser()
+    # First pass: load config file (--config flag)
+    pre_parser = argparse.ArgumentParser(add_help=False)
+    pre_parser.add_argument("--config", type=Path, default=None)
+    pre_args, _ = pre_parser.parse_known_args(argv)
+    config = load_config(pre_args.config)
+
+    parser = build_arg_parser(config)
     args = parser.parse_args(argv)
 
     ensure_dirs()
