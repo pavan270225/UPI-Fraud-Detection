@@ -40,7 +40,11 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS
+# Dark mode state
+if "dark_mode" not in st.session_state:
+    st.session_state.dark_mode = False
+
+# Custom CSS (light + dark themes)
 st.markdown("""
 <style>
     .metric-card {
@@ -54,6 +58,29 @@ st.markdown("""
     .alert-low { background-color: #e8f5e9; border-left: 4px solid #4caf50; }
     .stTabs [data-baseweb="tab-list"] { gap: 24px; }
     .stTabs [data-baseweb="tab"] { height: 50px; }
+
+    /* Dark mode overrides */
+    [data-theme="dark"] .metric-card,
+    .dark-mode .metric-card {
+        background-color: #2d2d2d !important;
+        color: #ffffff !important;
+    }
+    [data-theme="dark"] .stApp,
+    .dark-mode .stApp {
+        background-color: #0e1117 !important;
+    }
+    [data-theme="dark"] .stSidebar,
+    .dark-mode .stSidebar {
+        background-color: #1a1a1a !important;
+    }
+    [data-theme="dark"] .stMetric,
+    .dark-mode .stMetric {
+        background-color: #2d2d2d !important;
+    }
+    [data-theme="dark"] .stDataFrame,
+    .dark-mode .stDataFrame {
+        background-color: #2d2d2d !important;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -127,9 +154,19 @@ def prepare_xy(df):
 st.sidebar.title("🛡️ UPI Fraud Detection")
 st.sidebar.markdown("---")
 
+# Theme toggle
+dark_mode = st.sidebar.toggle("🌙 Dark Mode", value=st.session_state.dark_mode)
+st.session_state.dark_mode = dark_mode
+if dark_mode:
+    st.markdown('<script>document.body.classList.add("dark-mode")</script>', unsafe_allow_html=True)
+else:
+    st.markdown('<script>document.body.classList.remove("dark-mode")</script>', unsafe_allow_html=True)
+
+st.sidebar.markdown("---")
+
 page = st.sidebar.radio(
     "Navigate",
-    ["📊 Overview", "🎯 Risk Scoring", "🔍 SHAP Explanations", "📈 Drift Monitoring",
+    ["📊 Overview", "🎯 Risk Scoring", "🤖 Model Comparison", "🔍 SHAP Explanations", "📈 Drift Monitoring",
      "⚙️ Retraining Strategies", "⏱️ Delayed Labels", "📋 Reports"]
 )
 
@@ -290,6 +327,112 @@ elif page == "🎯 Risk Scoring":
 
         except Exception as e:
             st.error(f"Error loading test data: {e}")
+
+# ============================================================
+# PAGE: MODEL COMPARISON
+# ============================================================
+elif page == "🤖 Model Comparison":
+    st.title("🤖 Model Comparison")
+
+    st.markdown("Compare baseline model performance across IEEE-CIS and PaySim datasets.")
+
+    # Load metrics from reports
+    ieee_df = reports.get('ieee_test_metrics', pd.DataFrame())
+    paysim_df = reports.get('paysim_test_metrics', pd.DataFrame())
+
+    if ieee_df.empty and paysim_df.empty:
+        st.warning("No model metrics found. Run notebook 02_baselines.ipynb to generate evaluation results.")
+    else:
+        # Normalize column names
+        def normalize_metrics(df):
+            if df.empty:
+                return df
+            df = df.copy()
+            # Try to find model column
+            model_col = None
+            for col in df.columns:
+                if col.lower() in ('model', 'algorithm', 'name'):
+                    model_col = col
+                    break
+            if model_col and model_col != 'model':
+                df = df.rename(columns={model_col: 'model'})
+            return df
+
+        ieee_df = normalize_metrics(ieee_df)
+        paysim_df = normalize_metrics(paysim_df)
+
+        # Combined comparison table
+        st.subheader("📊 Side-by-Side Comparison")
+
+        metrics_to_show = ['pr_auc', 'precision_at_100', 'recall_at_100', 'fp_per_100k_at_budget_100']
+        available_metrics = [m for m in metrics_to_show if m in ieee_df.columns or m in paysim_df.columns]
+
+        if 'model' in ieee_df.columns or 'model' in paysim_df.columns:
+            # Build comparison from both datasets
+            all_models = set()
+            if 'model' in ieee_df.columns:
+                all_models.update(ieee_df['model'].tolist())
+            if 'model' in paysim_df.columns:
+                all_models.update(paysim_df['model'].tolist())
+
+            comparison_rows = []
+            for model in sorted(all_models):
+                row = {'model': model}
+                for m in available_metrics:
+                    ieee_val = None
+                    paysim_val = None
+                    if 'model' in ieee_df.columns and m in ieee_df.columns:
+                        match = ieee_df[ieee_df['model'] == model]
+                        if not match.empty:
+                            ieee_val = match.iloc[0][m]
+                    if 'model' in paysim_df.columns and m in paysim_df.columns:
+                        match = paysim_df[paysim_df['model'] == model]
+                        if not match.empty:
+                            paysim_val = match.iloc[0][m]
+                    row[f'ieee_{m}'] = ieee_val
+                    row[f'paysim_{m}'] = paysim_val
+                comparison_rows.append(row)
+
+            comp_df = pd.DataFrame(comparison_rows)
+            st.dataframe(comp_df, use_container_width=True, hide_index=True)
+
+            # Best model by PR-AUC (IEEE-CIS)
+            if 'ieee_pr_auc' in comp_df.columns:
+                best_model = comp_df.loc[comp_df['ieee_pr_auc'].idxmax()]
+                st.success(f"🏆 Best model (IEEE-CIS PR-AUC): **{best_model['model']}** with PR-AUC = {best_model['ieee_pr_auc']:.4f}")
+
+            # Charts
+            st.subheader("📈 Performance by Model")
+
+            col1, col2 = st.columns(2)
+
+            with col1:
+                if 'ieee_pr_auc' in comp_df.columns and comp_df['ieee_pr_auc'].notna().any():
+                    fig = px.bar(
+                        comp_df.dropna(subset=['ieee_pr_auc']).sort_values('ieee_pr_auc', ascending=True),
+                        x='ieee_pr_auc', y='model', orientation='h',
+                        title='PR-AUC by Model (IEEE-CIS)',
+                        labels={'ieee_pr_auc': 'PR-AUC', 'model': 'Model'},
+                        color='ieee_pr_auc', color_continuous_scale='Viridis'
+                    )
+                    fig.update_layout(height=400, showlegend=False)
+                    st.plotly_chart(fig, use_container_width=True)
+
+            with col2:
+                if 'ieee_precision_at_100' in comp_df.columns and comp_df['ieee_precision_at_100'].notna().any():
+                    fig = px.bar(
+                        comp_df.dropna(subset=['ieee_precision_at_100']).sort_values('ieee_precision_at_100', ascending=True),
+                        x='ieee_precision_at_100', y='model', orientation='h',
+                        title='Precision@100 by Model (IEEE-CIS)',
+                        labels={'ieee_precision_at_100': 'Precision@100', 'model': 'Model'},
+                        color='ieee_precision_at_100', color_continuous_scale='Plasma'
+                    )
+                    fig.update_layout(height=400, showlegend=False)
+                    st.plotly_chart(fig, use_container_width=True)
+
+        else:
+            st.info("Model column not found in metrics. Available columns: " + ", ".join(
+                list(ieee_df.columns) + list(paysim_df.columns)))
 
 # ============================================================
 # PAGE: SHAP EXPLANATIONS
