@@ -159,20 +159,31 @@ def prepare_features_target(
     df: pd.DataFrame,
     target_col: str = 'isFraud',
     drop_cols: Optional[list] = None,
-) -> Tuple[pd.DataFrame, pd.Series]:
+    require_target: bool = True,
+) -> Tuple[pd.DataFrame, Optional[pd.Series]]:
     """Separate features and target, drop non-feature columns."""
     default_drop = ['TransactionID', 'TransactionDT'] if 'TransactionID' in df.columns else []
     if drop_cols:
         default_drop.extend(drop_cols)
     drop_cols_final = [c for c in default_drop if c in df.columns]
-    X = df.drop(columns=drop_cols_final + [target_col])
-    y = df[target_col].astype('int8')
+    cols_to_drop = drop_cols_final.copy()
+    if target_col in df.columns:
+        cols_to_drop.append(target_col)
+    X = df.drop(columns=cols_to_drop)
+
+    if target_col in df.columns:
+        y = df[target_col].astype('int8')
+    elif require_target:
+        raise ValueError(f"Target column '{target_col}' not found in dataframe")
+    else:
+        y = None
+
     # Encode categorical columns to integer codes so sklearn models can consume them.
     # Mirrors dashboard/app.py prepare_xy behavior.
     for col in X.select_dtypes(include=['category']).columns:
         X[col] = X[col].cat.codes
     X = X.fillna(-999)
-    return X, y
+    return X, y  # type: ignore[return-value]
 
 
 def handle_class_imbalance(
