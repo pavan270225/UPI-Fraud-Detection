@@ -162,6 +162,7 @@ def alert_key(alert):
 @st.cache_resource
 def load_model_and_data():
     """Load model and data for explanations."""
+    model, meta = None, {}
     try:
         model_path = MODELS_DIR / 'ieee_lightgbm.joblib'
         if model_path.exists():
@@ -196,8 +197,9 @@ def prepare_xy(df):
     drop_cols = ['TransactionID', 'TransactionDT', 'isFraud']
     X = df.drop(columns=[c for c in drop_cols if c in df.columns])
     y = df['isFraud'].astype('int8') if 'isFraud' in df.columns else pd.Series(0, index=df.index)
-    for col in X.select_dtypes(include=['category']).columns:
-        X[col] = X[col].cat.codes
+    # encode ALL non-numeric columns (parquet reloads M1-M9 etc. as object)
+    for col in X.select_dtypes(exclude=['number']).columns:
+        X[col] = X[col].astype('category').cat.codes
     return X.fillna(-999), y
 
 # Sidebar

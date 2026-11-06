@@ -13,6 +13,8 @@ import numpy as np
 import pandas as pd
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import GridSearchCV, RandomizedSearchCV
 from sklearn.metrics import (
     average_precision_score,
@@ -37,7 +39,6 @@ MODEL_CONFIGS = {
         'params': {
             'max_iter': 1000,
             'solver': 'lbfgs',
-            'n_jobs': -1,
             'random_state': 42,
         },
     },
@@ -138,7 +139,11 @@ def get_model(model_name: str, class_weight_params: Optional[Dict] = None) -> An
                 k: v for k, v in class_weight_params.items() if k in valid_keys
             }
             params.update(filtered_params)
-    return config['class'](**params)
+    model = config['class'](**params)
+    if isinstance(model, LogisticRegression):
+        # lbfgs needs scaled features to converge (raw amounts, -999 fills)
+        model = Pipeline([('scaler', StandardScaler()), ('classifier', model)])
+    return model
 
 
 def train_model(
@@ -158,7 +163,7 @@ def train_model(
                 # XGBoost 3.x: early_stopping_rounds/callbacks removed from sklearn fit()
                 model.fit(X_train, y_train, eval_set=eval_set, verbose=False)
             else:
-                model.fit(X_train, y_train, eval_set=eval_set,
+                model.fit(X_train, y_train, eval_X=X_val, eval_y=y_val,
                           eval_metric='auc',
                           callbacks=[lgb.early_stopping(early_stopping_rounds), lgb.log_evaluation(0)])
         else:
@@ -209,6 +214,8 @@ def tune_hyperparameters(
 
     base_model = get_model(model_name, class_weight_params)
     param_grid = MODEL_PARAM_GRIDS[model_name]
+    if isinstance(base_model, Pipeline):
+        param_grid = {f'classifier__{k}': v for k, v in param_grid.items()}
 
     if search_type == 'grid':
         search = GridSearchCV(
@@ -277,11 +284,14 @@ def rolling_time_cv(
     test_window: int = 7,
     time_col: str = 'TransactionDT',
     class_weight_params: Optional[Dict] = None,
-) -> List[Dict[str, float]]:
+) -> List[Dict[str, Any]]:
     """Rolling time-window cross-validation."""
     if time_col not in X.columns:
         raise ValueError(f"Time column '{time_col}' not in features")
-    time_days = (X[time_col] // 86400).astype(int)
+    if time_col == 'step':
+        time_days = (X[time_col] // 24).astype(int)
+    else:
+        time_days = (X[time_col] // 86400).astype(int)
     min_day, max_day = time_days.min(), time_days.max()
     total_days = max_day - min_day
     step = (total_days - train_window - test_window) // (n_splits - 1) if n_splits > 1 else 0

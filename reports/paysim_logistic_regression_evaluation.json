@@ -1,0 +1,26 @@
+{
+  "dataset": "paysim",
+  "model": "logistic_regression",
+  "test_metrics": {
+    "pr_auc": 0.6833754208528324,
+    "roc_auc": 0.9833865770818534,
+    "precision": 0.13601488026040456,
+    "recall": 0.8753117206982544,
+    "precision_at_50": 1.0,
+    "recall_at_50": 1.0,
+    "precision_at_100": 1.0,
+    "recall_at_100": 1.0,
+    "precision_at_200": 1.0,
+    "recall_at_200": 1.0,
+    "precision_at_500": 1.0,
+    "recall_at_500": 1.0
+  },
+  "optimal_threshold": 0.9953113408688007,
+  "threshold_metrics": {
+    "threshold": 0.9953113408688007,
+    "precision": 0.8042521994134897,
+    "recall": 0.5471321695760598,
+    "f1": 0.651231819482828
+  },
+  "report": "============================================================\nEVALUATION REPORT: logistic_regression on paysim\n============================================================\n\nOPERATIONAL METRICS:\n  PR-AUC: 0.6834\n  ROC-AUC: 0.9834\n  Precision@100: 1.0000\n  Recall@100: 1.0000\n  FP/100k (budget=100): 0.00\n  Fraud Rate: 0.0000%\n  Alert Rate: 0.0000%\n\nRETRAINING METRICS:\n  Retrain Count: 0\n  Frequency (per month): 0.00\n  Avg Model Age (days): 0.0\n  Max Model Age (days): 0.0"
+}
