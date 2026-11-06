@@ -226,12 +226,18 @@ class SHAPExplainer:
         if not SHAP_AVAILABLE:
             raise SHAPExplainerError("SHAP not available")
 
+        # Sample once here so the plotted features and SHAP values have the same rows
+        # (explain_batch would otherwise subsample internally and the counts would mismatch)
+        if len(X_data) > max_samples:
+            X_data = X_data.sample(n=max_samples, random_state=42)
+        X_data = X_data[self.feature_names]
+
         shap_values = self.explain_batch(X_data, max_samples)
 
         if plot_type == 'dot':
-            shap.summary_plot(shap_values, X_data[self.feature_names], plot_type='dot', show=True)
+            shap.summary_plot(shap_values, X_data, plot_type='dot', show=True)
         elif plot_type == 'bar':
-            shap.summary_plot(shap_values, X_data[self.feature_names], plot_type='bar', show=True)
+            shap.summary_plot(shap_values, X_data, plot_type='bar', show=True)
 
         return shap_values
 
