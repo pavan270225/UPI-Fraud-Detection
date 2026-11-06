@@ -1,0 +1,5 @@
+Metadata-Version: 2.4
+Name: upi-fraud-detection
+Version: 0.1.0
+Summary: Drift-aware, explainable ML framework for UPI fraud detection
+Requires-Python: >=3.10

@@ -8,7 +8,7 @@ Implements three retraining strategies:
 """
 
 from pathlib import Path
-from typing import Dict, List, Optional, Any, Callable
+from typing import Dict, List, Optional, Any, Callable, Tuple
 import json
 import numpy as np
 import pandas as pd

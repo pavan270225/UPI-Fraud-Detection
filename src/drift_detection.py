@@ -369,6 +369,7 @@ def detect_drift_rolling(
     min_day, max_day = time_days.min(), time_days.max()
 
     results = []
+    ref_data = data  # bound on every path; first loop iteration overwrites it
     monitor = DriftMonitor(psi_threshold=psi_threshold)
 
     for start_day in range(min_day, max_day - window_size, step_size):

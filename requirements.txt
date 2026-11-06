@@ -17,6 +17,7 @@ seaborn>=0.12.0
 
 # Dashboard
 streamlit>=1.28.0
+plotly>=5.18.0
 
 # Development
 jupyter>=1.0.0

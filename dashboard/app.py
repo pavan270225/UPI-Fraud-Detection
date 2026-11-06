@@ -162,6 +162,7 @@ def alert_key(alert):
 @st.cache_resource
 def load_model_and_data():
     """Load model and data for explanations."""
+    model, meta = None, {}
     try:
         model_path = MODELS_DIR / 'ieee_lightgbm.joblib'
         if model_path.exists():

@@ -284,7 +284,7 @@ def rolling_time_cv(
     test_window: int = 7,
     time_col: str = 'TransactionDT',
     class_weight_params: Optional[Dict] = None,
-) -> List[Dict[str, float]]:
+) -> List[Dict[str, Any]]:
     """Rolling time-window cross-validation."""
     if time_col not in X.columns:
         raise ValueError(f"Time column '{time_col}' not in features")
