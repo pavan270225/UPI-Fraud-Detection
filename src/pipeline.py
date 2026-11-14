@@ -41,9 +41,14 @@ from models import (  # noqa: E402
     get_model,
     save_model,
     train_model,
+    train_all_baselines,
 )
 from drift_detection import (  # noqa: E402
     DriftMonitor,
+)
+from drift_river import (  # noqa: E402
+    RiverDriftDetector,
+    StreamingDriftMonitor,
 )
 from shap_explainer import (  # noqa: E402
     SHAPExplainer,
@@ -57,6 +62,16 @@ from evaluation import (  # noqa: E402
     compute_operational_metrics,
     generate_evaluation_report,
     find_optimal_threshold,
+)
+from ensemble import (  # noqa: E402
+    ModelEnsemble,
+    create_ensemble_from_results,
+    train_and_evaluate_ensemble,
+)
+from online_learning import (  # noqa: E402
+    OnlineModelWrapper,
+    OnlineRetrainer,
+    create_online_retrainer,
 )
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -147,6 +162,8 @@ def stage_train(
     class_weight_method: str = "class_weight",
     save: bool = True,
     quiet: bool = False,
+    create_ensemble: bool = False,
+    top_k: int = 3,
 ) -> Dict:
     """Train model(s) on a dataset. If model_name is None, trains all baselines."""
     log = print if not quiet else lambda *a, **k: None
@@ -205,6 +222,25 @@ def stage_train(
         except (ModelTrainingError, Exception) as exc:  # noqa: BLE001
             log(f"  ERROR training {name}: {exc}")
             results["models"][name] = {"error": str(exc)}
+
+    # Create ensemble of top-k models after training all baselines
+    if create_ensemble and model_name is None:
+        log(f"\n=== Creating ensemble from top {top_k} models ===")
+        try:
+            ensemble_results = stage_ensemble(
+                dataset=dataset,
+                train_ratio=train_ratio,
+                val_ratio=val_ratio,
+                test_ratio=test_ratio,
+                top_k=top_k,
+                class_weight_method=class_weight_method,
+                save=save,
+                quiet=quiet,
+            )
+            results["ensemble"] = ensemble_results
+        except Exception as exc:  # noqa: BLE001
+            log(f"  ERROR creating ensemble: {exc}")
+            results["ensemble"] = {"error": str(exc)}
 
     return results
 
@@ -405,10 +441,11 @@ def stage_retrain(
     test_metrics = evaluate_model(model, X_test, y_test)
 
     # Drift detection: train (reference) vs test (current)
+    # Use processed features (X_train, X_test) which have engineered features like amount_log, amount_round
     feature_cols = X_train.columns.tolist()
     monitor = DriftMonitor(psi_threshold=psi_threshold, ks_threshold=ks_threshold)
-    monitor.fit(train_df, feature_cols, score_col=None)
-    drift_result = monitor.check(test_df, timestamp="retrain_check")
+    monitor.fit(X_train, feature_cols, score_col=None)
+    drift_result = monitor.check(X_test, timestamp="retrain_check")
 
     alerts = drift_result.get("alerts", [])
     drift_detected = len(alerts) > 0
@@ -454,6 +491,227 @@ def stage_retrain(
     }
 
 
+def stage_ensemble(
+    dataset: str,
+    model_name: Optional[str] = None,
+    train_ratio: float = 0.7,
+    val_ratio: float = 0.15,
+    test_ratio: float = 0.15,
+    top_k: int = 3,
+    class_weight_method: str = "class_weight",
+    save: bool = True,
+    quiet: bool = False,
+) -> Dict:
+    """Create ensemble from top-k models weighted by validation PR-AUC."""
+    log = print if not quiet else lambda *a, **k: None
+    df, time_col, target_col = load_dataset(dataset)
+    train_df, val_df, test_df = split_data(df, time_col, train_ratio, val_ratio, test_ratio)
+
+    X_train, y_train = prepare_features_target(train_df, target_col=target_col)
+    X_val, y_val = prepare_features_target(val_df, target_col=target_col)
+    X_test, y_test = prepare_features_target(test_df, target_col=target_col)
+
+    class_weight_params = handle_class_imbalance(
+        X_train, y_train, method=class_weight_method
+    )
+
+    log(f"\n=== Training baselines for ensemble on {dataset} ===")
+    baseline_results = train_all_baselines(
+        X_train, y_train, X_val, y_val, class_weight_params, time_col
+    )
+
+    ensemble, test_metrics = train_and_evaluate_ensemble(
+        X_train, y_train, X_val, y_val, X_test, y_test,
+        baseline_results, top_k=top_k, class_weight_params=class_weight_params
+    )
+
+    results = {
+        "dataset": dataset,
+        "train_shape": X_train.shape,
+        "val_shape": X_val.shape,
+        "test_shape": X_test.shape,
+        "top_k": top_k,
+        "test_metrics": test_metrics,
+        "ensemble_weights": ensemble.weights,
+        "ensemble_models": list(ensemble.models.keys()),
+    }
+
+    if save:
+        model_path = MODELS_DIR / f"{dataset}_ensemble.joblib"
+        meta = {
+            "dataset": dataset,
+            "model": "ensemble",
+            "test_metrics": test_metrics,
+            "weights": ensemble.weights,
+            "model_names": list(ensemble.models.keys()),
+            "feature_names": X_train.columns.tolist(),
+        }
+        ensemble.save(model_path, metadata=meta)
+        log(f"  Saved ensemble -> {model_path}")
+
+    return results
+
+
+def stage_river_drift(
+    dataset: str,
+    reference_window_size: int = 1000,
+    psi_threshold: float = 0.2,
+    ks_threshold: float = 0.05,
+    score_threshold: float = 0.5,
+    river_detectors: Optional[List[str]] = None,
+    quiet: bool = False,
+) -> Dict:
+    """Run River-based streaming concept drift detection."""
+    log = print if not quiet else lambda *a, **k: None
+    df, time_col, target_col = load_dataset(dataset)
+
+    # Use a model to get scores (use lightgbm as default if available)
+    # Split data first
+    train_df, _, test_df = split_data(df, time_col, 0.7, 0.15, 0.15)
+    X_train, y_train = prepare_features_target(train_df, target_col=target_col)
+    X_test, y_test = prepare_features_target(test_df, target_col=target_col)
+
+    try:
+        from models import get_model, train_model
+        from data_prep import handle_class_imbalance
+        class_weight_params = handle_class_imbalance(X_train, y_train, method="class_weight")
+        model = get_model("lightgbm", class_weight_params)
+        model = train_model(model, X_train, y_train)
+        scores = model.predict_proba(X_test)[:, 1]
+        predictions = (scores >= score_threshold).astype(int)
+    except Exception as e:
+        log(f"Warning: Could not train model for drift detection: {e}")
+        # Use dummy scores for demonstration
+        import numpy as np
+        n = len(X_test)
+        scores = np.random.random(n)
+        predictions = (scores >= score_threshold).astype(int)
+
+    # Split scores into reference and current windows
+    ref_scores = scores[:reference_window_size]
+    cur_scores = scores[reference_window_size:]
+    # Align predictions and y_test with current window
+    cur_predictions = predictions[reference_window_size:]
+    cur_y_test = y_test.iloc[reference_window_size:]
+
+    # Create streaming monitor
+    monitor = StreamingDriftMonitor(
+        river_detectors=river_detectors or ['adwin', 'ddm', 'eddm', 'hddm_a', 'hddm_w', 'kswin'],
+        psi_threshold=psi_threshold,
+        ks_threshold=ks_threshold,
+        score_threshold=score_threshold,
+        reference_window_size=reference_window_size,
+    )
+    monitor.fit_reference(ref_scores.tolist())
+
+    # Stream through current window
+    alerts = []
+    for i, (score, pred, true_label) in enumerate(zip(cur_scores, cur_predictions, cur_y_test.values)):
+        alert = monitor.update(
+            score=float(score),
+            prediction=int(pred),
+            true_label=int(true_label),
+        )
+        if alert:
+            alerts.extend([{'index': i, **v} for v in alert.values()])
+
+    # Get comprehensive results
+    results = monitor.check_all()
+    results['alerts'] = alerts
+    results['dataset'] = dataset
+    results['reference_size'] = len(ref_scores)
+    results['current_size'] = len(cur_scores)
+
+    # Save alerts
+    alerts_path = REPORTS_DIR / f"{dataset}_river_drift_alerts.json"
+    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+    with open(alerts_path, "w") as f:
+        json.dump(results, f, indent=2, default=str)
+    log(f"River drift report -> {alerts_path}")
+    log(f"  Total alerts: {len(alerts)}")
+    log(f"  River detectors: {list(results.get('river_detectors', {}).keys())}")
+
+    return results
+
+
+def stage_online_learning(
+    dataset: str,
+    model_type: str = 'adaptive_random_forest',
+    train_ratio: float = 0.7,
+    val_ratio: float = 0.15,
+    test_ratio: float = 0.15,
+    buffer_size: int = 1000,
+    eval_interval: int = 500,
+    class_weight_method: str = "class_weight",
+    save: bool = True,
+    quiet: bool = False,
+) -> Dict:
+    """Run online/incremental learning on streaming data."""
+    log = print if not quiet else lambda *a, **k: None
+    df, time_col, target_col = load_dataset(dataset)
+    train_df, val_df, test_df = split_data(df, time_col, train_ratio, val_ratio, test_ratio)
+
+    X_train, y_train = prepare_features_target(train_df, target_col=target_col)
+    X_val, y_val = prepare_features_target(val_df, target_col=target_col)
+    X_test, y_test = prepare_features_target(test_df, target_col=target_col)
+
+    class_weight_params = handle_class_imbalance(
+        X_train, y_train, method=class_weight_method
+    )
+    class_weight = class_weight_params.get('class_weight', {0: 1.0, 1: 1.0})
+
+    # Create online retrainer
+    retrainer = create_online_retrainer(
+        model_type=model_type,
+        class_weight=class_weight,
+    )
+    retrainer.initialize()
+
+    # Train on initial training data (batch)
+    log(f"\n=== Online learning {model_type} on {dataset} ===")
+    log(f"  Initial training on {len(X_train)} samples...")
+    retrainer.model.learn_batch(X_train, y_train)
+
+    # Evaluate on validation set
+    val_metrics = retrainer.evaluate_on_test(X_val, y_val)
+    log(f"  Initial Val PR-AUC: {val_metrics.get('pr_auc', 0):.4f}")
+
+    # Stream test data
+    log(f"  Streaming {len(X_test)} test samples...")
+    test_alerts = []
+    for i, (_, row) in enumerate(X_test.iterrows()):
+        x = row.to_dict()
+        y = int(y_test.iloc[i])
+        score = retrainer.model.predict_proba_one(x).get(1, 0.0)
+        result = retrainer.partial_fit(x, y, score=score)
+        if result.get('drift_detected'):
+            test_alerts.append({'index': i, 'drift': result['drift_check']})
+        if result.get('metrics'):
+            log(f"  Sample {result['samples_processed']}: PR-AUC={result['metrics'].get('pr_auc', 0):.4f}")
+
+    # Final evaluation
+    test_metrics = retrainer.evaluate_on_test(X_test, y_test)
+    log(f"  Final Test PR-AUC: {test_metrics.get('pr_auc', 0):.4f}")
+
+    results = {
+        "dataset": dataset,
+        "model_type": model_type,
+        "train_samples": len(X_train),
+        "test_samples": len(X_test),
+        "val_metrics": val_metrics,
+        "test_metrics": test_metrics,
+        "performance_history": retrainer.get_performance_history().to_dict("records"),
+        "drift_alerts": test_alerts,
+    }
+
+    if save:
+        model_path = MODELS_DIR / f"{dataset}_online_{model_type}.joblib"
+        retrainer.model.save(model_path)
+        log(f"  Saved online model -> {model_path}")
+
+    return results
+
+
 def build_arg_parser(config: Optional[Dict] = None) -> argparse.ArgumentParser:
     config = config or {}
     train_cfg = config.get("train", {})
@@ -493,6 +751,10 @@ def build_arg_parser(config: Optional[Dict] = None) -> argparse.ArgumentParser:
     p_train.add_argument("--train-ratio", type=float, default=train_cfg.get("train_ratio", 0.7), help="Train split ratio")
     p_train.add_argument("--val-ratio", type=float, default=train_cfg.get("val_ratio", 0.15), help="Validation split ratio")
     p_train.add_argument("--test-ratio", type=float, default=train_cfg.get("test_ratio", 0.15), help="Test split ratio")
+    p_train.add_argument("--create-ensemble", action="store_true", default=train_cfg.get("create_ensemble", False),
+                         help="Create ensemble from top-k models after training")
+    p_train.add_argument("--top-k", type=int, default=train_cfg.get("top_k", 3),
+                         help="Number of top models for ensemble")
 
     p_eval = sub.add_parser("evaluate", help="Evaluate a saved model on test split")
     p_eval.add_argument("--model", required=True, help="Model name (e.g. lightgbm)")
@@ -519,6 +781,42 @@ def build_arg_parser(config: Optional[Dict] = None) -> argparse.ArgumentParser:
     p_retrain.add_argument("--ks-threshold", type=float, default=retrain_cfg.get("ks_threshold", 0.05), help="KS drift threshold")
     p_retrain.add_argument("--force", action="store_true", default=retrain_cfg.get("force", False), help="Force retrain even without drift")
 
+    p_ensemble = sub.add_parser("ensemble", help="Create weighted ensemble from top-k models")
+    p_ensemble.add_argument("--top-k", type=int, default=3, help="Number of top models to ensemble")
+    p_ensemble.add_argument("--train-ratio", type=float, default=train_cfg.get("train_ratio", 0.7), help="Train split ratio")
+    p_ensemble.add_argument("--val-ratio", type=float, default=train_cfg.get("val_ratio", 0.15), help="Validation split ratio")
+    p_ensemble.add_argument("--test-ratio", type=float, default=train_cfg.get("test_ratio", 0.15), help="Test split ratio")
+    p_ensemble.add_argument("--no-save", action="store_true", help="Do not persist ensemble")
+
+    p_river_drift = sub.add_parser("river-drift", help="Run River-based streaming concept drift detection")
+    river_detectors_cfg = config.get("river_drift", {}).get("detectors", ['adwin', 'ddm', 'eddm', 'hddm_a', 'hddm_w', 'kswin'])
+    p_river_drift.add_argument("--detectors", nargs="+", default=river_detectors_cfg,
+                                help="River detectors to use (adwin, ddm, eddm, hddm_a, hddm_w, kswin)")
+    p_river_drift.add_argument("--ref-size", type=int, default=config.get("river_drift", {}).get("ref_size", 1000),
+                                help="Reference window size")
+    p_river_drift.add_argument("--psi-threshold", type=float, default=config.get("river_drift", {}).get("psi_threshold", 0.2),
+                                help="PSI threshold")
+    p_river_drift.add_argument("--ks-threshold", type=float, default=config.get("river_drift", {}).get("ks_threshold", 0.05),
+                                help="KS threshold")
+    p_river_drift.add_argument("--score-threshold", type=float, default=config.get("river_drift", {}).get("score_threshold", 0.5),
+                                help="Classification threshold for error-based detectors")
+
+    p_online = sub.add_parser("online-learning", help="Run online/incremental learning")
+    p_online.add_argument("--model-type", choices=['logistic_regression', 'adaptive_random_forest', 'hoeffding_tree'],
+                           default=config.get("online_learning", {}).get("model_type", "adaptive_random_forest"),
+                           help="Online model type")
+    p_online.add_argument("--train-ratio", type=float, default=train_cfg.get("train_ratio", 0.7), help="Train split ratio")
+    p_online.add_argument("--val-ratio", type=float, default=train_cfg.get("val_ratio", 0.15), help="Validation split ratio")
+    p_online.add_argument("--test-ratio", type=float, default=train_cfg.get("test_ratio", 0.15), help="Test split ratio")
+    p_online.add_argument("--buffer-size", type=int, default=config.get("online_learning", {}).get("buffer_size", 1000),
+                           help="Buffer size for batch updates")
+    p_online.add_argument("--eval-interval", type=int, default=config.get("online_learning", {}).get("eval_interval", 500),
+                           help="Evaluation interval")
+    p_online.add_argument("--class-weight-method", choices=['class_weight', 'smote', 'none'],
+                           default=config.get("online_learning", {}).get("class_weight_method", "class_weight"),
+                           help="Class imbalance handling method")
+    p_online.add_argument("--no-save", action="store_true", help="Do not persist model")
+
     p_all = sub.add_parser("run-all", help="Run full pipeline: train -> evaluate -> drift -> shap")
     p_all.add_argument("--model", choices=list(MODEL_CONFIGS.keys()), default=run_all_cfg.get("model", "lightgbm"),
                        help="Primary model for evaluate/shap stages")
@@ -528,6 +826,10 @@ def build_arg_parser(config: Optional[Dict] = None) -> argparse.ArgumentParser:
     p_all.add_argument("--psi-threshold", type=float, default=run_all_cfg.get("psi_threshold", 0.2), help="PSI drift threshold")
     p_all.add_argument("--ks-threshold", type=float, default=run_all_cfg.get("ks_threshold", 0.05), help="KS drift threshold")
     p_all.add_argument("--force-retrain", action="store_true", default=run_all_cfg.get("force_retrain", False), help="Force retrain even without drift")
+    p_all.add_argument("--create-ensemble", action="store_true", default=run_all_cfg.get("create_ensemble", False),
+                       help="Create ensemble from top-k models after training")
+    p_all.add_argument("--top-k", type=int, default=run_all_cfg.get("top_k", 3),
+                       help="Number of top models for ensemble")
 
     return parser
 
@@ -554,6 +856,8 @@ def main(argv: Optional[list] = None) -> int:
                 test_ratio=args.test_ratio,
                 save=not args.no_save,
                 quiet=args.quiet,
+                create_ensemble=getattr(args, 'create_ensemble', False),
+                top_k=getattr(args, 'top_k', 3),
             )
         elif args.stage == "retrain":
             stage_retrain(
@@ -597,6 +901,8 @@ def main(argv: Optional[list] = None) -> int:
                 test_ratio=args.test_ratio,
                 save=True,
                 quiet=args.quiet,
+                create_ensemble=getattr(args, 'create_ensemble', False),
+                top_k=getattr(args, 'top_k', 3),
             )
             stage_evaluate(dataset=args.dataset, model_name=args.model)
             stage_drift(dataset=args.dataset)
@@ -612,6 +918,29 @@ def main(argv: Optional[list] = None) -> int:
                 quiet=args.quiet,
             )
             stage_shap(dataset=args.dataset, model_name=args.model)
+        elif args.stage == "river-drift":
+            stage_river_drift(
+                dataset=args.dataset,
+                reference_window_size=args.ref_size,
+                psi_threshold=args.psi_threshold,
+                ks_threshold=args.ks_threshold,
+                score_threshold=args.score_threshold,
+                river_detectors=args.detectors,
+                quiet=args.quiet,
+            )
+        elif args.stage == "online-learning":
+            stage_online_learning(
+                dataset=args.dataset,
+                model_type=args.model_type,
+                train_ratio=args.train_ratio,
+                val_ratio=args.val_ratio,
+                test_ratio=args.test_ratio,
+                buffer_size=args.buffer_size,
+                eval_interval=args.eval_interval,
+                class_weight_method=args.class_weight_method,
+                save=not args.no_save,
+                quiet=args.quiet,
+            )
         else:
             parser.print_help()
             return 2

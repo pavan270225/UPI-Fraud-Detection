@@ -5,7 +5,7 @@ Handles loading, preprocessing, and time-ordered splitting of IEEE-CIS and PaySi
 """
 
 from pathlib import Path
-from typing import Tuple, Dict, Optional
+from typing import Tuple, Dict, Optional, Union
 import pandas as pd
 import numpy as np
 
@@ -16,7 +16,7 @@ class DataQualityError(Exception):
 
 
 # Column dtype specifications for memory efficiency and consistency
-IEEE_CIS_DTYPES = {
+IEEE_CIS_DTYPES: Dict[str, Union[str, np.dtype, type]] = {
     'TransactionID': 'int64',
     'isFraud': 'int8',
     'TransactionDT': 'int64',
@@ -36,7 +36,7 @@ IEEE_CIS_DTYPES = {
     'R_emaildomain': 'category',
 }
 
-PAYSIM_DTYPES = {
+PAYSIM_DTYPES: Dict[str, Union[str, np.dtype, type]] = {
     'step': 'int32',
     'type': 'category',
     'amount': 'float32',
@@ -160,8 +160,9 @@ def prepare_features_target(
     target_col: str = 'isFraud',
     drop_cols: Optional[list] = None,
     require_target: bool = True,
+    add_features: bool = True,
 ) -> Tuple[pd.DataFrame, Optional[pd.Series]]:
-    """Separate features and target, drop non-feature columns."""
+    """Separate features and target, drop non-feature columns, and optionally add engineered features."""
     default_drop = ['TransactionID', 'TransactionDT'] if 'TransactionID' in df.columns else []
     if drop_cols:
         default_drop.extend(drop_cols)
@@ -178,6 +179,10 @@ def prepare_features_target(
     else:
         y = None
 
+    # Add engineered features if requested
+    if add_features:
+        X = _add_engineered_features(X)
+
     # Encode categorical columns to integer codes so sklearn models can consume them.
     # Mirrors dashboard/app.py prepare_xy behavior.
     for col in X.select_dtypes(include=['category', 'object']).columns:
@@ -186,20 +191,61 @@ def prepare_features_target(
     return X, y  # type: ignore[return-value]
 
 
+def _add_engineered_features(df: pd.DataFrame) -> pd.DataFrame:
+    """Add engineered features for fraud detection.
+
+    Creates time-based, amount-based, and balance-based features.
+    Works for both IEEE-CIS (TransactionDT in seconds) and PaySim (step in hours).
+    """
+    df = df.copy()
+
+    # Time features
+    if 'TransactionDT' in df.columns:
+        # IEEE-CIS: TransactionDT is in seconds
+        df['hour'] = (df['TransactionDT'] // 3600) % 24
+        df['day'] = (df['TransactionDT'] // 86400).astype(int)
+    elif 'step' in df.columns:
+        # PaySim: step is in hours
+        df['hour'] = df['step'] % 24
+        df['day'] = (df['step'] // 24).astype(int)
+
+    # Amount features
+    amount_col = 'TransactionAmt' if 'TransactionAmt' in df.columns else 'amount'
+    if amount_col in df.columns:
+        df['amount_log'] = np.log1p(df[amount_col])
+        df['amount_round'] = (df[amount_col] % 1 == 0).astype(int)
+
+    # Balance-based features (PaySim specific)
+    if 'oldbalanceOrg' in df.columns and 'newbalanceOrig' in df.columns:
+        df['orig_balance_diff'] = df['oldbalanceOrg'] - df['newbalanceOrig']
+        df['zero_balance_orig'] = (df['oldbalanceOrg'] == 0).astype(int)
+    if 'oldbalanceDest' in df.columns and 'newbalanceDest' in df.columns:
+        df['dest_balance_diff'] = df['newbalanceDest'] - df['oldbalanceDest']
+        df['zero_balance_dest'] = (df['oldbalanceDest'] == 0).astype(int)
+
+    return df
+
+
 def handle_class_imbalance(
     X_train: pd.DataFrame,
     y_train: pd.Series,
     method: str = 'class_weight',
 ) -> Dict:
-    """Return parameters for handling class imbalance."""
+    """Return parameters for handling class imbalance.
+
+    Returns dict with:
+    - scale_pos_weight: float for LightGBM/XGBoost
+    - class_weight: dict {0: 1.0, 1: scale_pos_weight} for sklearn/River compatibility
+    """
     fraud_rate = y_train.mean()
     scale_pos_weight = (1 - fraud_rate) / fraud_rate
+    class_weight_dict = {0: 1.0, 1: scale_pos_weight}
     if method == 'class_weight':
-        return {'scale_pos_weight': scale_pos_weight, 'class_weight': 'balanced'}
+        return {'scale_pos_weight': scale_pos_weight, 'class_weight': class_weight_dict}
     elif method == 'smote':
-        return {'scale_pos_weight': 1.0}
+        return {'scale_pos_weight': 1.0, 'class_weight': class_weight_dict}
     else:
-        return {'scale_pos_weight': 1.0}
+        return {'scale_pos_weight': 1.0, 'class_weight': class_weight_dict}
 
 
 if __name__ == '__main__':

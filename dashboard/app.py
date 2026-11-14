@@ -30,7 +30,7 @@ warnings.filterwarnings('ignore')
 
 from data_prep import load_ieee_cis, load_paysim, prepare_features_target
 from models import evaluate_model, get_model
-from drift_detection import DriftMonitor, population_stability_index
+from drift_detection import DriftMonitor, population_stability_index, alert_key
 from shap_explainer import SHAPExplainer
 from pipeline import stage_train, stage_drift, stage_retrain
 
@@ -47,15 +47,72 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Dark mode state
+# Paths (resolved relative to this file so it works from any working directory)
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+DATA_ROOT = PROJECT_ROOT / 'data'
+MODELS_DIR = PROJECT_ROOT / 'models'
+REPORTS_DIR = PROJECT_ROOT / 'reports'
+ALERT_STATUS_PATH = REPORTS_DIR / 'alert_status.json'
+
+
+# ── Alert status persistence ──
+def load_alert_status():
+    """Load alert acknowledgment/resolution status from disk."""
+    if ALERT_STATUS_PATH.exists():
+        try:
+            with open(ALERT_STATUS_PATH) as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {}
+
+
+def save_alert_status(status_dict):
+    """Persist alert status to disk."""
+    try:
+        REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+        with open(ALERT_STATUS_PATH, 'w') as f:
+            json.dump(status_dict, f, indent=2)
+    except Exception as exc:
+        st.error(f"Failed to save alert status: {exc}")
+
+
+
+@st.cache_data
+def load_reports():
+    """Load all report files."""
+    reports = {}
+    report_files = {
+        'ieee_test_metrics': REPORTS_DIR / 'ieee_test_metrics.csv',
+        'paysim_test_metrics': REPORTS_DIR / 'paysim_test_metrics.csv',
+        'drift_alerts': REPORTS_DIR / 'drift_alerts_log.csv',
+        'shap_global': REPORTS_DIR / 'shap_global_importance.csv',
+        'shap_stability': REPORTS_DIR / 'shap_stability.csv',
+        'retrain_comparison': REPORTS_DIR / 'retraining_strategy_comparison.csv',
+        'delay_impact': REPORTS_DIR / 'delay_impact_summary.csv',
+    }
+    for name, path in report_files.items():
+        if path.exists():
+            # CSVs from notebooks use index_col=0 for model names
+            if name in ('ieee_test_metrics', 'paysim_test_metrics'):
+                df = pd.read_csv(path, index_col=0)
+                # Convert index to 'model' column for downstream use
+                df = df.reset_index().rename(columns={'index': 'model'})
+                reports[name] = df
+            else:
+                reports[name] = pd.read_csv(path)
+        else:
+            reports[name] = pd.DataFrame()
+    return reports
+
+
+# Session state initialization
 if "dark_mode" not in st.session_state:
     st.session_state.dark_mode = False
 
-# Prediction history state
 if "prediction_history" not in st.session_state:
     st.session_state.prediction_history = []
 
-# Alert status state
 if "alert_status" not in st.session_state:
     st.session_state.alert_status = load_alert_status()
 
@@ -98,66 +155,6 @@ st.markdown("""
     }
 </style>
 """, unsafe_allow_html=True)
-
-# Paths
-DATA_ROOT = Path('../data')
-MODELS_DIR = Path('../models')
-REPORTS_DIR = Path('../reports')
-ALERT_STATUS_PATH = REPORTS_DIR / 'alert_status.json'
-
-@st.cache_data
-def load_reports():
-    """Load all report files."""
-    reports = {}
-    report_files = {
-        'ieee_test_metrics': REPORTS_DIR / 'ieee_test_metrics.csv',
-        'paysim_test_metrics': REPORTS_DIR / 'paysim_test_metrics.csv',
-        'drift_alerts': REPORTS_DIR / 'drift_alerts_log.csv',
-        'shap_global': REPORTS_DIR / 'shap_global_importance.csv',
-        'shap_stability': REPORTS_DIR / 'shap_stability.csv',
-        'retrain_comparison': REPORTS_DIR / 'retraining_strategy_comparison.csv',
-        'delay_impact': REPORTS_DIR / 'delay_impact_summary.csv',
-    }
-    for name, path in report_files.items():
-        if path.exists():
-            reports[name] = pd.read_csv(path)
-        else:
-            reports[name] = pd.DataFrame()
-    return reports
-
-
-# ── Alert status persistence ──
-def load_alert_status():
-    """Load alert acknowledgment/resolution status from disk."""
-    if ALERT_STATUS_PATH.exists():
-        try:
-            with open(ALERT_STATUS_PATH) as f:
-                return json.load(f)
-        except Exception:
-            return {}
-    return {}
-
-
-def save_alert_status(status_dict):
-    """Persist alert status to disk."""
-    try:
-        REPORTS_DIR.mkdir(parents=True, exist_ok=True)
-        with open(ALERT_STATUS_PATH, 'w') as f:
-            json.dump(status_dict, f, indent=2)
-    except Exception as exc:
-        st.error(f"Failed to save alert status: {exc}")
-
-
-def alert_key(alert):
-    """Generate a stable key for an alert from its fields."""
-    alert_type = str(alert.get('type', ''))
-    column = str(alert.get('column', ''))
-    metric = str(alert.get('metric', ''))
-    try:
-        value = float(alert.get('value', 0))
-    except (TypeError, ValueError):
-        value = 0.0
-    return f"{alert_type}|{column}|{metric}|{value:.4f}"
 
 @st.cache_resource
 def load_model_and_data():
@@ -209,10 +206,58 @@ st.sidebar.markdown("---")
 # Theme toggle
 dark_mode = st.sidebar.toggle("🌙 Dark Mode", value=st.session_state.dark_mode)
 st.session_state.dark_mode = dark_mode
+
+# Apply dark mode via Streamlit's theme system
 if dark_mode:
-    st.markdown('<script>document.body.classList.add("dark-mode")</script>', unsafe_allow_html=True)
+    # Use custom CSS to override Streamlit's theme
+    st.markdown("""
+    <style>
+    [data-testid="stAppViewContainer"] {
+        background-color: #0e1117 !important;
+    }
+    [data-testid="stSidebar"] {
+        background-color: #1a1a1a !important;
+    }
+    [data-testid="stHeader"] {
+        background-color: #0e1117 !important;
+    }
+    .stMetric {
+        background-color: #2d2d2d !important;
+    }
+    .stDataFrame {
+        background-color: #2d2d2d !important;
+    }
+    .metric-card {
+        background-color: #2d2d2d !important;
+        color: #ffffff !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
 else:
-    st.markdown('<script>document.body.classList.remove("dark-mode")</script>', unsafe_allow_html=True)
+    # Light mode styles
+    st.markdown("""
+    <style>
+    [data-testid="stAppViewContainer"] {
+        background-color: #FFFFFF !important;
+    }
+    [data-testid="stSidebar"] {
+        background-color: #F3F4F6 !important;
+    }
+    [data-testid="stHeader"] {
+        background-color: #FFFFFF !important;
+    }
+    .stMetric {
+        background-color: #f0f2f6 !important;
+    }
+    .stDataFrame {
+        background-color: #FFFFFF !important;
+    }
+    .metric-card {
+        background-color: #f0f2f6 !important;
+        color: #1F2937 !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
 
 st.sidebar.markdown("---")
 
@@ -545,13 +590,17 @@ elif page == "🚀 Pipeline Control":
     col1, col2, col3 = st.columns(3)
     with col1:
         pc_model = st.selectbox("Model",
-                                ["lightgbm", "logistic_regression", "random_forest", "xgboost", "all"],
+                                ["lightgbm", "logistic_regression", "random_forest", "xgboost", "catboost", "all"],
                                 key="pc_model")
     with col2:
         pc_train_ratio = st.slider("Train Ratio", 0.5, 0.9, 0.7, 0.05, key="pc_train_ratio")
     with col3:
         pc_val_ratio = st.slider("Val Ratio", 0.05, 0.3, 0.15, 0.05, key="pc_val_ratio")
     pc_test_ratio = st.slider("Test Ratio", 0.05, 0.3, 0.15, 0.05, key="pc_test_ratio")
+
+    # Ensemble options
+    pc_create_ensemble = st.checkbox("Create Ensemble from Top-K Models", key="pc_create_ensemble")
+    pc_top_k = st.slider("Top-K for Ensemble", 2, 5, 3, key="pc_top_k")
 
     if st.button("🏋️ Train", key="pc_train_btn"):
         with st.spinner("Training models..."):
@@ -563,6 +612,8 @@ elif page == "🚀 Pipeline Control":
                     val_ratio=pc_val_ratio,
                     test_ratio=pc_test_ratio,
                     quiet=True,
+                    create_ensemble=pc_create_ensemble,
+                    top_k=pc_top_k,
                 )
                 st.success("✅ Training completed!")
                 if "models" in result:
@@ -572,6 +623,11 @@ elif page == "🚀 Pipeline Control":
                         else:
                             st.write(f"**{name}**: Val PR-AUC = {m['val_metrics']['pr_auc']:.4f}, "
                                      f"Test PR-AUC = {m['test_metrics']['pr_auc']:.4f}")
+                if "ensemble" in result and result["ensemble"]:
+                    ens = result["ensemble"]
+                    st.write(f"**Ensemble**: Test PR-AUC = {ens.get('test_metrics', {}).get('pr_auc', 'N/A'):.4f}")
+                    st.write(f"  Models: {ens.get('ensemble_models', [])}")
+                    st.write(f"  Weights: {ens.get('ensemble_weights', {})}")
             except Exception as exc:
                 st.error(f"❌ Training failed: {exc}")
 
@@ -638,6 +694,91 @@ elif page == "🚀 Pipeline Control":
                     st.write(f"**Drift alerts**: {len(result['drift_alerts'])}")
             except Exception as exc:
                 st.error(f"❌ Retraining failed: {exc}")
+
+    st.divider()
+
+    # ── River Drift Detection ──
+    st.subheader("🌊 River Streaming Drift Detection")
+    st.markdown("Real-time concept drift detection using ADWIN, DDM, EDDM, HDDM_A, HDDM_W, KSWIN.")
+
+    col1, col2 = st.columns(2)
+    with col1:
+        pc_river_detectors = st.multiselect(
+            "River Detectors",
+            ["adwin", "ddm", "eddm", "hddm_a", "hddm_w", "kswin"],
+            default=["adwin", "ddm", "eddm", "hddm_a", "hddm_w", "kswin"],
+            key="pc_river_detectors"
+        )
+    with col2:
+        pc_river_ref_size = st.slider("Reference Window Size", 100, 5000, 1000, 100, key="pc_river_ref_size")
+
+    pc_river_psi = st.slider("PSI Threshold", 0.1, 0.5, 0.2, 0.05, key="pc_river_psi")
+    pc_river_ks = st.slider("KS Threshold", 0.01, 0.2, 0.05, 0.01, key="pc_river_ks")
+    pc_river_score_threshold = st.slider("Score Threshold", 0.1, 0.9, 0.5, 0.05, key="pc_river_score_threshold")
+
+    if st.button("🌊 Run River Drift Detection", key="pc_river_drift_btn"):
+        with st.spinner("Running River drift detection..."):
+            try:
+                from src.pipeline import stage_river_drift
+                result = stage_river_drift(
+                    dataset=dataset,
+                    reference_window_size=pc_river_ref_size,
+                    psi_threshold=pc_river_psi,
+                    ks_threshold=pc_river_ks,
+                    score_threshold=pc_river_score_threshold,
+                    river_detectors=pc_river_detectors,
+                    quiet=True,
+                )
+                st.success("✅ River drift detection completed!")
+                st.write(f"**Total alerts**: {len(result.get('alerts', []))}")
+                st.write(f"**Detectors used**: {list(result.get('river_detectors', {}).keys())}")
+                for detector, detected in result.get('river_detectors', {}).items():
+                    st.write(f"  - {detector}: {'🔴 Drift' if detected else '🟢 No drift'}")
+            except Exception as exc:
+                st.error(f"❌ River drift detection failed: {exc}")
+
+    st.divider()
+
+    # ── Online Learning ──
+    st.subheader("🔁 Online/Incremental Learning")
+    st.markdown("Train models incrementally on streaming data without full retraining.")
+
+    col1, col2 = st.columns(2)
+    with col1:
+        pc_online_model = st.selectbox(
+            "Online Model Type",
+            ["logistic_regression", "adaptive_random_forest", "hoeffding_tree"],
+            key="pc_online_model"
+        )
+    with col2:
+        pc_online_buffer = st.slider("Buffer Size", 100, 5000, 1000, 100, key="pc_online_buffer")
+
+    pc_online_eval_interval = st.slider("Evaluation Interval", 100, 2000, 500, 100, key="pc_online_eval_interval")
+
+    if st.button("🔁 Run Online Learning", key="pc_online_btn"):
+        with st.spinner("Running online learning..."):
+            try:
+                from src.pipeline import stage_online_learning
+                result = stage_online_learning(
+                    dataset=dataset,
+                    model_type=pc_online_model,
+                    train_ratio=pc_train_ratio,
+                    val_ratio=pc_val_ratio,
+                    test_ratio=pc_test_ratio,
+                    buffer_size=pc_online_buffer,
+                    eval_interval=pc_online_eval_interval,
+                    save=True,
+                    quiet=True,
+                )
+                st.success("✅ Online learning completed!")
+                st.write(f"**Model**: {result.get('model_type')}")
+                st.write(f"**Train samples**: {result.get('train_samples')}")
+                st.write(f"**Test samples**: {result.get('test_samples')}")
+                st.write(f"**Val PR-AUC**: {result.get('val_metrics', {}).get('pr_auc', 'N/A'):.4f}")
+                st.write(f"**Test PR-AUC**: {result.get('test_metrics', {}).get('pr_auc', 'N/A'):.4f}")
+                st.write(f"**Drift alerts**: {len(result.get('drift_alerts', []))}")
+            except Exception as exc:
+                st.error(f"❌ Online learning failed: {exc}")
 
     st.divider()
 
@@ -922,7 +1063,7 @@ elif page == "📈 Drift Monitoring":
                 st.metric("Resolved", resolved_stored)
 
             # Per-row alerts with actions
-            for _, row in alerts_df.iterrows():
+            for idx, (_, row) in enumerate(alerts_df.iterrows()):
                 alert = row.to_dict()
                 value = alert.get("value", 0)
                 try:
@@ -947,13 +1088,13 @@ elif page == "📈 Drift Monitoring":
                     st.write(f"{status_icon} {severity} — {alert.get('type','')}: {alert.get('column','')} ({alert.get('metric','')}={value:.4f})")
                 with col_b:
                     if current_status != "acknowledged":
-                        if st.button("✓ Ack", key=f"ack_stored_{key}"):
+                        if st.button("✓ Ack", key=f"ack_stored_{idx}_{key}"):
                             st.session_state.alert_status[key] = "acknowledged"
                             save_alert_status(st.session_state.alert_status)
                             st.rerun()
                 with col_c:
                     if current_status != "resolved":
-                        if st.button("✅ Resolve", key=f"res_stored_{key}"):
+                        if st.button("✅ Resolve", key=f"res_stored_{idx}_{key}"):
                             st.session_state.alert_status[key] = "resolved"
                             save_alert_status(st.session_state.alert_status)
                             st.rerun()
