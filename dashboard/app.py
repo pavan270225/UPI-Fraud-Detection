@@ -116,42 +116,559 @@ if "prediction_history" not in st.session_state:
 if "alert_status" not in st.session_state:
     st.session_state.alert_status = load_alert_status()
 
-# Custom CSS (light + dark themes)
+# Custom CSS - Modern AI/3D Style Dashboard
 st.markdown("""
 <style>
-    .metric-card {
-        background-color: #f0f2f6;
-        padding: 1rem;
-        border-radius: 0.5rem;
-        margin: 0.5rem 0;
-    }
-    .alert-high { background-color: #ffebee; border-left: 4px solid #f44336; }
-    .alert-medium { background-color: #fff3e0; border-left: 4px solid #ff9800; }
-    .alert-low { background-color: #e8f5e9; border-left: 4px solid #4caf50; }
-    .stTabs [data-baseweb="tab-list"] { gap: 24px; }
-    .stTabs [data-baseweb="tab"] { height: 50px; }
+    @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap');
 
-    /* Dark mode overrides */
-    [data-theme="dark"] .metric-card,
-    .dark-mode .metric-card {
-        background-color: #2d2d2d !important;
-        color: #ffffff !important;
+    :root {
+        /* Light theme tokens */
+        --bg-primary: #fafafa;
+        --bg-secondary: #ffffff;
+        --bg-tertiary: #f5f5f5;
+        --bg-card: rgba(255, 255, 255, 0.85);
+        --bg-card-hover: rgba(255, 255, 255, 0.95);
+        --border-color: rgba(148, 163, 184, 0.2);
+        --border-glow: rgba(99, 102, 241, 0.3);
+        --text-primary: #0f172a;
+        --text-secondary: #475569;
+        --text-muted: #94a3b8;
+        --accent-primary: #6366f1;
+        --accent-secondary: #8b5cf6;
+        --accent-tertiary: #06b6d4;
+        --accent-gradient: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #06b6d4 100%);
+        --shadow-sm: 0 1px 2px 0 rgba(15, 23, 42, 0.05);
+        --shadow-md: 0 4px 6px -1px rgba(15, 23, 42, 0.1), 0 2px 4px -2px rgba(15, 23, 42, 0.1);
+        --shadow-lg: 0 10px 15px -3px rgba(15, 23, 42, 0.1), 0 4px 6px -4px rgba(15, 23, 42, 0.1);
+        --shadow-xl: 0 20px 25px -5px rgba(15, 23, 42, 0.1), 0 8px 10px -6px rgba(15, 23, 42, 0.1);
+        --shadow-3d: 0 25px 50px -12px rgba(99, 102, 241, 0.25), 0 0 0 1px rgba(99, 102, 241, 0.1);
+        --shadow-glow: 0 0 40px -10px rgba(99, 102, 241, 0.4);
+        --radius-sm: 8px;
+        --radius-md: 12px;
+        --radius-lg: 16px;
+        --radius-xl: 24px;
+        --transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
+        --transition-normal: 250ms cubic-bezier(0.4, 0, 0.2, 1);
+        --transition-slow: 400ms cubic-bezier(0.4, 0, 0.2, 1);
     }
+
+    [data-theme="dark"], .dark-mode {
+        --bg-primary: #030712;
+        --bg-secondary: #0f172a;
+        --bg-tertiary: #1e293b;
+        --bg-card: rgba(15, 23, 42, 0.85);
+        --bg-card-hover: rgba(30, 41, 59, 0.95);
+        --border-color: rgba(148, 163, 184, 0.15);
+        --border-glow: rgba(129, 140, 248, 0.4);
+        --text-primary: #f8fafc;
+        --text-secondary: #cbd5e1;
+        --text-muted: #64748b;
+        --accent-primary: #818cf8;
+        --accent-secondary: #a78bfa;
+        --accent-tertiary: #22d3ee;
+        --accent-gradient: linear-gradient(135deg, #818cf8 0%, #a78bfa 50%, #22d3ee 100%);
+        --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.3);
+        --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.4), 0 2px 4px -2px rgba(0, 0, 0, 0.3);
+        --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.4), 0 4px 6px -4px rgba(0, 0, 0, 0.3);
+        --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.4);
+        --shadow-3d: 0 25px 50px -12px rgba(129, 140, 248, 0.3), 0 0 0 1px rgba(129, 140, 248, 0.15);
+        --shadow-glow: 0 0 40px -10px rgba(129, 140, 248, 0.5);
+    }
+
+    /* Global styles */
+    .stApp {
+        background: var(--bg-primary) !important;
+        color: var(--text-primary) !important;
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif !important;
+    }
+
+    /* Animated gradient background */
+    .stApp::before {
+        content: '';
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background:
+            radial-gradient(ellipse 80% 50% at 20% 0%, rgba(99, 102, 241, 0.08) 0%, transparent 50%),
+            radial-gradient(ellipse 60% 40% at 80% 100%, rgba(139, 92, 246, 0.06) 0%, transparent 50%),
+            radial-gradient(ellipse 50% 30% at 50% 50%, rgba(6, 182, 212, 0.04) 0%, transparent 60%);
+        pointer-events: none;
+        z-index: -1;
+        animation: gradientShift 20s ease-in-out infinite;
+    }
+
+    @keyframes gradientShift {
+        0%, 100% { transform: translate(0, 0) scale(1); opacity: 1; }
+        25% { transform: translate(-2%, 1%) scale(1.02); opacity: 0.9; }
+        50% { transform: translate(1%, -1%) scale(0.98); opacity: 1; }
+        75% { transform: translate(-1%, -2%) scale(1.01); opacity: 0.95; }
+    }
+
+    /* Typography */
+    h1, h2, h3, h4, h5, h6 {
+        font-family: 'Space Grotesk', 'Inter', sans-serif !important;
+        font-weight: 600 !important;
+        letter-spacing: -0.02em !important;
+    }
+
+    h1 { font-size: clamp(2rem, 5vw, 3rem) !important; background: var(--accent-gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+    h2 { font-size: clamp(1.5rem, 3vw, 2.25rem) !important; }
+    h3 { font-size: clamp(1.25rem, 2.5vw, 1.75rem) !important; }
+
+    /* Sidebar */
+    [data-testid="stSidebar"] {
+        background: var(--bg-secondary) !important;
+        border-right: 1px solid var(--border-color) !important;
+        backdrop-filter: blur(20px) !important;
+    }
+
+    [data-testid="stSidebar"] .stMarkdown h1,
+    [data-testid="stSidebar"] .stMarkdown h2,
+    [data-testid="stSidebar"] .stMarkdown h3 {
+        background: var(--accent-gradient) !important;
+        -webkit-background-clip: text !important;
+        -webkit-text-fill-color: transparent !important;
+        background-clip: text !important;
+    }
+
+    /* Cards - Glassmorphism with 3D depth */
+    .glass-card {
+        background: var(--bg-card) !important;
+        backdrop-filter: blur(20px) saturate(180%) !important;
+        -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
+        border: 1px solid var(--border-color) !important;
+        border-radius: var(--radius-lg) !important;
+        padding: 1.5rem !important;
+        box-shadow: var(--shadow-md) !important;
+        transition: all var(--transition-normal) !important;
+        position: relative !important;
+        overflow: hidden !important;
+    }
+
+    .glass-card::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 1px;
+        background: linear-gradient(90deg, transparent, var(--accent-primary), transparent);
+        opacity: 0;
+        transition: opacity var(--transition-normal);
+    }
+
+    .glass-card:hover {
+        transform: translateY(-4px) scale(1.01) !important;
+        box-shadow: var(--shadow-3d) !important;
+        border-color: var(--border-glow) !important;
+        background: var(--bg-card-hover) !important;
+    }
+
+    .glass-card:hover::before {
+        opacity: 1;
+    }
+
+    .glass-card-elevated {
+        box-shadow: var(--shadow-xl) !important;
+        transform: translateZ(20px);
+    }
+
+    /* Metric cards */
+    .metric-card {
+        background: var(--bg-card) !important;
+        backdrop-filter: blur(20px) saturate(180%) !important;
+        -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
+        border: 1px solid var(--border-color) !important;
+        border-radius: var(--radius-lg) !important;
+        padding: 1.5rem !important;
+        box-shadow: var(--shadow-md) !important;
+        transition: all var(--transition-normal) !important;
+        position: relative !important;
+        overflow: hidden !important;
+    }
+
+    .metric-card::after {
+        content: '';
+        position: absolute;
+        bottom: 0;
+        left: 50%;
+        width: 0;
+        height: 3px;
+        background: var(--accent-gradient);
+        transform: translateX(-50%);
+        transition: width var(--transition-normal);
+        border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+    }
+
+    .metric-card:hover {
+        transform: translateY(-6px) rotateX(2deg) !important;
+        box-shadow: var(--shadow-3d) !important;
+        border-color: var(--border-glow) !important;
+    }
+
+    .metric-card:hover::after {
+        width: 100%;
+    }
+
+    .stMetric {
+        background: transparent !important;
+        box-shadow: none !important;
+        border: none !important;
+        padding: 0 !important;
+    }
+
+    .stMetric > div {
+        background: var(--bg-card) !important;
+        backdrop-filter: blur(20px) saturate(180%) !important;
+        -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
+        border: 1px solid var(--border-color) !important;
+        border-radius: var(--radius-md) !important;
+        padding: 1.25rem !important;
+        transition: all var(--transition-fast) !important;
+    }
+
+    .stMetric > div:hover {
+        transform: translateY(-3px) !important;
+        box-shadow: var(--shadow-lg) !important;
+        border-color: var(--border-glow) !important;
+    }
+
+    [data-testid="stMetricLabel"] {
+        font-family: 'Inter', sans-serif !important;
+        font-size: 0.875rem !important;
+        font-weight: 500 !important;
+        color: var(--text-secondary) !important;
+        text-transform: uppercase !important;
+        letter-spacing: 0.05em !important;
+    }
+
+    [data-testid="stMetricValue"] {
+        font-family: 'Space Grotesk', sans-serif !important;
+        font-size: 2.5rem !important;
+        font-weight: 700 !important;
+        background: var(--accent-gradient) !important;
+        -webkit-background-clip: text !important;
+        -webkit-text-fill-color: transparent !important;
+        background-clip: text !important;
+        line-height: 1.1 !important;
+    }
+
+    [data-testid="stMetricDelta"] {
+        font-family: 'Inter', sans-serif !important;
+        font-size: 0.875rem !important;
+        font-weight: 500 !important;
+    }
+
+    /* Buttons */
+    .stButton > button {
+        font-family: 'Space Grotesk', sans-serif !important;
+        font-weight: 600 !important;
+        font-size: 0.9375rem !important;
+        padding: 0.75rem 1.5rem !important;
+        border-radius: var(--radius-md) !important;
+        border: none !important;
+        background: var(--accent-gradient) !important;
+        color: white !important;
+        box-shadow: var(--shadow-md) !important;
+        transition: all var(--transition-fast) !important;
+        position: relative !important;
+        overflow: hidden !important;
+    }
+
+    .stButton > button::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: -100%;
+        width: 100%;
+        height: 100%;
+        background: linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent);
+        transition: left var(--transition-slow);
+    }
+
+    .stButton > button:hover {
+        transform: translateY(-2px) scale(1.02) !important;
+        box-shadow: var(--shadow-glow), var(--shadow-lg) !important;
+    }
+
+    .stButton > button:hover::before {
+        left: 100%;
+    }
+
+    .stButton > button:active {
+        transform: translateY(0) scale(0.98) !important;
+    }
+
+    /* Secondary button variant */
+    .stButton > button[kind="secondary"] {
+        background: var(--bg-tertiary) !important;
+        color: var(--text-primary) !important;
+        border: 1px solid var(--border-color) !important;
+        box-shadow: var(--shadow-sm) !important;
+    }
+
+    .stButton > button[kind="secondary"]:hover {
+        background: var(--bg-card) !important;
+        border-color: var(--border-glow) !important;
+        box-shadow: var(--shadow-md) !important;
+    }
+
+    /* Tabs */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 8px !important;
+        background: var(--bg-tertiary) !important;
+        padding: 6px !important;
+        border-radius: var(--radius-lg) !important;
+        border: 1px solid var(--border-color) !important;
+        backdrop-filter: blur(20px) !important;
+    }
+
+    .stTabs [data-baseweb="tab"] {
+        font-family: 'Space Grotesk', sans-serif !important;
+        font-weight: 500 !important;
+        font-size: 0.9375rem !important;
+        height: 44px !important;
+        padding: 0 1.5rem !important;
+        border-radius: var(--radius-md) !important;
+        background: transparent !important;
+        color: var(--text-secondary) !important;
+        transition: all var(--transition-fast) !important;
+        border: none !important;
+    }
+
+    .stTabs [data-baseweb="tab"]:hover {
+        color: var(--text-primary) !important;
+        background: var(--bg-card) !important;
+    }
+
+    .stTabs [aria-selected="true"] {
+        background: var(--accent-gradient) !important;
+        color: white !important;
+        box-shadow: var(--shadow-md) !important;
+    }
+
+    /* DataFrames */
+    .stDataFrame {
+        background: var(--bg-card) !important;
+        backdrop-filter: blur(20px) saturate(180%) !important;
+        -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
+        border: 1px solid var(--border-color) !important;
+        border-radius: var(--radius-lg) !important;
+        overflow: hidden !important;
+        box-shadow: var(--shadow-md) !important;
+    }
+
+    .stDataFrame:hover {
+        box-shadow: var(--shadow-lg) !important;
+        border-color: var(--border-glow) !important;
+    }
+
+    /* Alerts */
+    .alert-high, .alert-medium, .alert-low {
+        backdrop-filter: blur(20px) saturate(180%) !important;
+        -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
+        border-radius: var(--radius-md) !important;
+        padding: 1rem 1.25rem !important;
+        margin: 0.5rem 0 !important;
+        border: none !important;
+        border-left: 4px solid !important;
+        transition: all var(--transition-normal) !important;
+        position: relative !important;
+        overflow: hidden !important;
+    }
+
+    .alert-high { background: rgba(239, 68, 68, 0.1) !important; border-left-color: #ef4444 !important; }
+    .alert-medium { background: rgba(249, 115, 22, 0.1) !important; border-left-color: #f97316 !important; }
+    .alert-low { background: rgba(34, 197, 94, 0.1) !important; border-left-color: #22c55e !important; }
+
+    .alert-high:hover, .alert-medium:hover, .alert-low:hover {
+        transform: translateX(4px) !important;
+        box-shadow: var(--shadow-md) !important;
+    }
+
+    /* Inputs */
+    .stTextInput > div > div > input,
+    .stNumberInput > div > div > input,
+    .stSelectbox > div > div > div,
+    .stTextArea > div > div > textarea {
+        background: var(--bg-card) !important;
+        backdrop-filter: blur(20px) !important;
+        border: 1px solid var(--border-color) !important;
+        border-radius: var(--radius-md) !important;
+        color: var(--text-primary) !important;
+        font-family: 'Inter', sans-serif !important;
+        transition: all var(--transition-fast) !important;
+    }
+
+    .stTextInput > div > div > input:focus,
+    .stNumberInput > div > div > input:focus,
+    .stSelectbox > div > div > div:focus-within,
+    .stTextArea > div > div > textarea:focus {
+        border-color: var(--accent-primary) !important;
+        box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2) !important;
+        outline: none !important;
+    }
+
+    /* Sliders */
+    .stSlider > div > div > div > div {
+        background: var(--accent-gradient) !important;
+    }
+
+    /* Progress bars */
+    .stProgress > div > div > div > div {
+        background: var(--accent-gradient) !important;
+        border-radius: 4px !important;
+    }
+
+    /* Expander */
+    .streamlit-expanderHeader {
+        font-family: 'Space Grotesk', sans-serif !important;
+        font-weight: 600 !important;
+        background: var(--bg-card) !important;
+        backdrop-filter: blur(20px) !important;
+        border: 1px solid var(--border-color) !important;
+        border-radius: var(--radius-md) !important;
+        padding: 1rem 1.25rem !important;
+        transition: all var(--transition-fast) !important;
+    }
+
+    .streamlit-expanderHeader:hover {
+        border-color: var(--border-glow) !important;
+        background: var(--bg-card-hover) !important;
+    }
+
+    .streamlit-expanderContent {
+        background: var(--bg-card) !important;
+        backdrop-filter: blur(20px) !important;
+        border: 1px solid var(--border-color) !important;
+        border-top: none !important;
+        border-radius: 0 0 var(--radius-md) var(--radius-md) !important;
+        padding: 1rem 1.25rem !important;
+    }
+
+    /* Radio */
+    .stRadio > div {
+        background: var(--bg-card) !important;
+        backdrop-filter: blur(20px) !important;
+        border: 1px solid var(--border-color) !important;
+        border-radius: var(--radius-lg) !important;
+        padding: 0.75rem !important;
+        gap: 0.5rem !important;
+    }
+
+    .stRadio label {
+        font-family: 'Inter', sans-serif !important;
+        font-weight: 500 !important;
+        color: var(--text-secondary) !important;
+        padding: 0.5rem 1rem !important;
+        border-radius: var(--radius-md) !important;
+        transition: all var(--transition-fast) !important;
+    }
+
+    .stRadio label:hover {
+        background: var(--bg-tertiary) !important;
+        color: var(--text-primary) !important;
+    }
+
+    .stRadio input:checked + div {
+        background: var(--accent-gradient) !important;
+        color: white !important;
+    }
+
+    /* Selectbox */
+    .stSelectbox > div > div {
+        background: var(--bg-card) !important;
+        backdrop-filter: blur(20px) !important;
+        border: 1px solid var(--border-color) !important;
+        border-radius: var(--radius-md) !important;
+    }
+
+    /* File uploader */
+    .stFileUploader > div > div {
+        background: var(--bg-card) !important;
+        backdrop-filter: blur(20px) !important;
+        border: 2px dashed var(--border-color) !important;
+        border-radius: var(--radius-lg) !important;
+        transition: all var(--transition-fast) !important;
+    }
+
+    .stFileUploader > div > div:hover {
+        border-color: var(--accent-primary) !important;
+        background: var(--bg-card-hover) !important;
+    }
+
+    /* Plotly charts */
+    .js-plotly-plot {
+        background: transparent !important;
+        border-radius: var(--radius-lg) !important;
+    }
+
+    /* Animations */
+    @keyframes fadeInUp {
+        from { opacity: 0; transform: translateY(20px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+
+    @keyframes fadeInScale {
+        from { opacity: 0; transform: scale(0.95); }
+        to { opacity: 1; transform: scale(1); }
+    }
+
+    @keyframes pulseGlow {
+        0%, 100% { box-shadow: 0 0 20px -5px rgba(99, 102, 241, 0.3); }
+        50% { box-shadow: 0 0 40px -5px rgba(99, 102, 241, 0.5); }
+    }
+
+    .animate-fade-in-up { animation: fadeInUp 0.6s var(--transition-normal) forwards; }
+    .animate-fade-in-scale { animation: fadeInScale 0.4s var(--transition-normal) forwards; }
+    .animate-pulse-glow { animation: pulseGlow 2s ease-in-out infinite; }
+
+    /* Staggered animation delays */
+    .stagger-1 { animation-delay: 100ms; }
+    .stagger-2 { animation-delay: 200ms; }
+    .stagger-3 { animation-delay: 300ms; }
+    .stagger-4 { animation-delay: 400ms; }
+    .stagger-5 { animation-delay: 500ms; }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-track { background: var(--bg-tertiary); }
+    ::-webkit-scrollbar-thumb { background: var(--accent-gradient); border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--accent-secondary); }
+    ::-webkit-scrollbar-corner { background: var(--bg-tertiary); }
+
+    /* Selection */
+    ::selection { background: rgba(99, 102, 241, 0.3); color: var(--text-primary); }
+
+    /* Focus visible */
+    :focus-visible {
+        outline: 2px solid var(--accent-primary) !important;
+        outline-offset: 2px !important;
+    }
+
+    /* Reduce motion */
+    @media (prefers-reduced-motion: reduce) {
+        *, *::before, *::after {
+            animation-duration: 0.01ms !important;
+            animation-iteration-count: 1 !important;
+            transition-duration: 0.01ms !important;
+        }
+    }
+
+    /* Dark mode specific adjustments */
     [data-theme="dark"] .stApp,
     .dark-mode .stApp {
-        background-color: #0e1117 !important;
+        background: var(--bg-primary) !important;
     }
-    [data-theme="dark"] .stSidebar,
-    .dark-mode .stSidebar {
-        background-color: #1a1a1a !important;
-    }
-    [data-theme="dark"] .stMetric,
-    .dark-mode .stMetric {
-        background-color: #2d2d2d !important;
-    }
-    [data-theme="dark"] .stDataFrame,
-    .dark-mode .stDataFrame {
-        background-color: #2d2d2d !important;
+
+    [data-theme="dark"] .stApp::before,
+    .dark-mode .stApp::before {
+        background:
+            radial-gradient(ellipse 80% 50% at 20% 0%, rgba(129, 140, 248, 0.1) 0%, transparent 50%),
+            radial-gradient(ellipse 60% 40% at 80% 100%, rgba(167, 139, 250, 0.08) 0%, transparent 50%),
+            radial-gradient(ellipse 50% 30% at 50% 50%, rgba(34, 211, 238, 0.06) 0%, transparent 60%);
     }
 </style>
 """, unsafe_allow_html=True)
@@ -207,57 +724,11 @@ st.sidebar.markdown("---")
 dark_mode = st.sidebar.toggle("🌙 Dark Mode", value=st.session_state.dark_mode)
 st.session_state.dark_mode = dark_mode
 
-# Apply dark mode via Streamlit's theme system
+# Apply theme via data attribute on document
 if dark_mode:
-    # Use custom CSS to override Streamlit's theme
-    st.markdown("""
-    <style>
-    [data-testid="stAppViewContainer"] {
-        background-color: #0e1117 !important;
-    }
-    [data-testid="stSidebar"] {
-        background-color: #1a1a1a !important;
-    }
-    [data-testid="stHeader"] {
-        background-color: #0e1117 !important;
-    }
-    .stMetric {
-        background-color: #2d2d2d !important;
-    }
-    .stDataFrame {
-        background-color: #2d2d2d !important;
-    }
-    .metric-card {
-        background-color: #2d2d2d !important;
-        color: #ffffff !important;
-    }
-    </style>
-    """, unsafe_allow_html=True)
+    st.markdown('<script>document.documentElement.setAttribute("data-theme", "dark"); document.body.classList.add("dark-mode")</script>', unsafe_allow_html=True)
 else:
-    # Light mode styles
-    st.markdown("""
-    <style>
-    [data-testid="stAppViewContainer"] {
-        background-color: #FFFFFF !important;
-    }
-    [data-testid="stSidebar"] {
-        background-color: #F3F4F6 !important;
-    }
-    [data-testid="stHeader"] {
-        background-color: #FFFFFF !important;
-    }
-    .stMetric {
-        background-color: #f0f2f6 !important;
-    }
-    .stDataFrame {
-        background-color: #FFFFFF !important;
-    }
-    .metric-card {
-        background-color: #f0f2f6 !important;
-        color: #1F2937 !important;
-    }
-    </style>
-    """, unsafe_allow_html=True)
+    st.markdown('<script>document.documentElement.removeAttribute("data-theme"); document.body.classList.remove("dark-mode")</script>', unsafe_allow_html=True)
 
 st.sidebar.markdown("---")
 
@@ -276,58 +747,146 @@ model, model_meta = load_model_and_data()
 # PAGE: OVERVIEW
 # ============================================================
 if page == "📊 Overview":
-    st.title("📊 UPI Fraud Detection - System Overview")
+    # Hero section with animated gradient text
+    st.markdown("""
+    <div class="glass-card animate-fade-in-up" style="margin-bottom: 2rem;">
+        <div style="text-align: center; padding: 1rem;">
+            <h1 style="margin-bottom: 0.5rem;">UPI Fraud Detection</h1>
+            <p style="font-size: 1.25rem; color: var(--text-secondary); font-weight: 400; margin: 0;">
+                Drift-Aware Explainable ML Framework for Digital Payments
+            </p>
+            <div style="margin-top: 1.5rem; display: flex; justify-content: center; gap: 1rem; flex-wrap: wrap;">
+                <span style="background: var(--accent-gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; font-weight: 600;">IEEE-CIS</span>
+                <span style="color: var(--text-muted);">|</span>
+                <span style="background: var(--accent-gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; font-weight: 600;">PaySim</span>
+                <span style="color: var(--text-muted);">|</span>
+                <span style="background: var(--accent-gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; font-weight: 600;">LightGBM</span>
+                <span style="color: var(--text-muted);">|</span>
+                <span style="background: var(--accent-gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; font-weight: 600;">SHAP</span>
+            </div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
 
+    # KPI Cards using glass cards
     col1, col2, col3, col4 = st.columns(4)
 
     with col1:
-        st.metric("Project", "UPI Fraud Detection", help="Drift-Aware Explainable ML Framework")
+        st.markdown("""
+        <div class="glass-card metric-card animate-fade-in-up stagger-1">
+            <div style="font-size: 0.75rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 0.5rem;">Project</div>
+            <div style="font-family: 'Space Grotesk', sans-serif; font-size: 1.75rem; font-weight: 700; background: var(--accent-gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; line-height: 1.2;">UPI Fraud Detection</div>
+            <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.5rem;">Drift-Aware Explainable ML</div>
+        </div>
+        """, unsafe_allow_html=True)
 
     with col2:
         if not reports['ieee_test_metrics'].empty:
             best_pr_auc = reports['ieee_test_metrics']['pr_auc'].max()
-            st.metric("Best PR-AUC (IEEE-CIS)", f"{best_pr_auc:.4f}",
-                     delta="Target: >0.85" if best_pr_auc > 0.85 else "Below target")
+            delta_color = "#22c55e" if best_pr_auc > 0.85 else "#ef4444"
+            delta_text = "Target: >0.85" if best_pr_auc > 0.85 else "Below target"
+            st.markdown(f"""
+            <div class="glass-card metric-card animate-fade-in-up stagger-2">
+                <div style="font-size: 0.75rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 0.5rem;">Best PR-AUC (IEEE-CIS)</div>
+                <div style="font-family: 'Space Grotesk', sans-serif; font-size: 2.5rem; font-weight: 700; background: var(--accent-gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; line-height: 1.1;">{best_pr_auc:.4f}</div>
+                <div style="font-size: 0.8rem; color: {delta_color}; margin-top: 0.5rem; font-weight: 500;">{delta_text}</div>
+            </div>
+            """, unsafe_allow_html=True)
         else:
-            st.metric("Best PR-AUC", "N/A")
+            st.markdown("""
+            <div class="glass-card metric-card animate-fade-in-up stagger-2">
+                <div style="font-size: 0.75rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 0.5rem;">Best PR-AUC</div>
+                <div style="font-family: 'Space Grotesk', sans-serif; font-size: 2.5rem; font-weight: 700; color: var(--text-muted); line-height: 1.1;">N/A</div>
+            </div>
+            """, unsafe_allow_html=True)
 
     with col3:
         if not reports['drift_alerts'].empty:
             total_alerts = len(reports['drift_alerts'])
-            st.metric("Drift Alerts", total_alerts)
+            st.markdown(f"""
+            <div class="glass-card metric-card animate-fade-in-up stagger-3">
+                <div style="font-size: 0.75rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 0.5rem;">Drift Alerts</div>
+                <div style="font-family: 'Space Grotesk', sans-serif; font-size: 2.5rem; font-weight: 700; background: var(--accent-gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; line-height: 1.1;">{total_alerts}</div>
+                <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.5rem;">Total alerts logged</div>
+            </div>
+            """, unsafe_allow_html=True)
         else:
-            st.metric("Drift Alerts", "N/A")
+            st.markdown("""
+            <div class="glass-card metric-card animate-fade-in-up stagger-3">
+                <div style="font-size: 0.75rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 0.5rem;">Drift Alerts</div>
+                <div style="font-family: 'Space Grotesk', sans-serif; font-size: 2.5rem; font-weight: 700; color: var(--text-muted); line-height: 1.1;">N/A</div>
+            </div>
+            """, unsafe_allow_html=True)
 
     with col4:
         if not reports['retrain_comparison'].empty:
             strategies = reports['retrain_comparison']['strategy'].nunique()
-            st.metric("Strategies Compared", strategies)
+            st.markdown(f"""
+            <div class="glass-card metric-card animate-fade-in-up stagger-4">
+                <div style="font-size: 0.75rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 0.5rem;">Strategies Compared</div>
+                <div style="font-family: 'Space Grotesk', sans-serif; font-size: 2.5rem; font-weight: 700; background: var(--accent-gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; line-height: 1.1;">{strategies}</div>
+                <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.5rem;">Retraining approaches</div>
+            </div>
+            """, unsafe_allow_html=True)
         else:
-            st.metric("Strategies Compared", "N/A")
+            st.markdown("""
+            <div class="glass-card metric-card animate-fade-in-up stagger-4">
+                <div style="font-size: 0.75rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 0.5rem;">Strategies Compared</div>
+                <div style="font-family: 'Space Grotesk', sans-serif; font-size: 2.5rem; font-weight: 700; color: var(--text-muted); line-height: 1.1;">N/A</div>
+            </div>
+            """, unsafe_allow_html=True)
 
-    st.markdown("---")
+    st.markdown("<br>", unsafe_allow_html=True)
 
-    # Project description
-    st.subheader("Project Description")
+    # Project description in glass card
     st.markdown("""
-    **A Drift-Aware and Explainable Machine Learning Framework for Fraud Detection in UPI Digital Payments under Delayed Labels**
+    <div class="glass-card animate-fade-in-up" style="margin-bottom: 2rem;">
+        <h2 style="margin-bottom: 1.5rem; font-size: 1.5rem;">Project Description</h2>
+        <p style="font-size: 1.05rem; line-height: 1.7; color: var(--text-secondary); margin-bottom: 1.5rem;">
+            <strong>A Drift-Aware and Explainable Machine Learning Framework for Fraud Detection in UPI Digital Payments under Delayed Labels</strong>
+        </p>
+        <p style="font-size: 0.95rem; line-height: 1.7; color: var(--text-secondary); margin-bottom: 1rem;">
+            This system implements a comprehensive fraud detection pipeline for UPI (Unified Payments Interface) digital payments:
+        </p>
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 0.75rem; margin-top: 1rem;">
+            <div style="padding: 1rem; background: var(--bg-tertiary); border-radius: var(--radius-md); border: 1px solid var(--border-color); transition: all var(--transition-fast);" onmouseover="this.style.borderColor='var(--border-glow)'; this.style.transform='translateY(-2px)'" onmouseout="this.style.borderColor='var(--border-color)'; this.style.transform='translateY(0)'">
+                <div style="font-weight: 600; color: var(--text-primary); margin-bottom: 0.25rem;">📊 Data</div>
+                <div style="font-size: 0.9rem; color: var(--text-secondary);">IEEE-CIS & PaySim as UPI proxies</div>
+            </div>
+            <div style="padding: 1rem; background: var(--bg-tertiary); border-radius: var(--radius-md); border: 1px solid var(--border-color); transition: all var(--transition-fast);" onmouseover="this.style.borderColor='var(--border-glow)'; this.style.transform='translateY(-2px)'" onmouseout="this.style.borderColor='var(--border-color)'; this.style.transform='translateY(0)'">
+                <div style="font-weight: 600; color: var(--text-primary); margin-bottom: 0.25rem;">🤖 Models</div>
+                <div style="font-size: 0.9rem; color: var(--text-secondary);">LR, RF, XGBoost, LightGBM with rolling CV</div>
+            </div>
+            <div style="padding: 1rem; background: var(--bg-tertiary); border-radius: var(--radius-md); border: 1px solid var(--border-color); transition: all var(--transition-fast);" onmouseover="this.style.borderColor='var(--border-glow)'; this.style.transform='translateY(-2px)'" onmouseout="this.style.borderColor='var(--border-color)'; this.style.transform='translateY(0)'">
+                <div style="font-weight: 600; color: var(--text-primary); margin-bottom: 0.25rem;">📈 Drift Monitoring</div>
+                <div style="font-size: 0.9rem; color: var(--text-secondary);">PSI & KS tests on features & scores</div>
+            </div>
+            <div style="padding: 1rem; background: var(--bg-tertiary); border-radius: var(--radius-md); border: 1px solid var(--border-color); transition: all var(--transition-fast);" onmouseover="this.style.borderColor='var(--border-glow)'; this.style.transform='translateY(-2px)'" onmouseout="this.style.borderColor='var(--border-color)'; this.style.transform='translateY(0)'">
+                <div style="font-weight: 600; color: var(--text-primary); margin-bottom: 0.25rem;">🔍 Explainability</div>
+                <div style="font-size: 0.9rem; color: var(--text-secondary);">TreeSHAP instance + global importance</div>
+            </div>
+            <div style="padding: 1rem; background: var(--bg-tertiary); border-radius: var(--radius-md); border: 1px solid var(--border-color); transition: all var(--transition-fast);" onmouseover="this.style.borderColor='var(--border-glow)'; this.style.transform='translateY(-2px)'" onmouseout="this.style.borderColor='var(--border-color)'; this.style.transform='translateY(0)'">
+                <div style="font-weight: 600; color: var(--text-primary); margin-bottom: 0.25rem;">⚙️ Retraining</div>
+                <div style="font-size: 0.9rem; color: var(--text-secondary);">Static vs Scheduled vs Drift-Triggered</div>
+            </div>
+            <div style="padding: 1rem; background: var(--bg-tertiary); border-radius: var(--radius-md); border: 1px solid var(--border-color); transition: all var(--transition-fast);" onmouseover="this.style.borderColor='var(--border-glow)'; this.style.transform='translateY(-2px)'" onmouseout="this.style.borderColor='var(--border-color)'; this.style.transform='translateY(0)'">
+                <div style="font-weight: 600; color: var(--text-primary); margin-bottom: 0.25rem;">⏱️ Delayed Labels</div>
+                <div style="font-size: 0.9rem; color: var(--text-secondary);">1/7/30-day delay simulation</div>
+            </div>
+        </div>
+        <div style="margin-top: 1.5rem; padding-top: 1.5rem; border-top: 1px solid var(--border-color); display: flex; justify-content: center; gap: 2rem; flex-wrap: wrap; color: var(--text-muted); font-size: 0.9rem;">
+            <span><strong>Student:</strong> Pavan C (USN: 4VV25MC060)</span>
+            <span><strong>College:</strong> Vidyavardhaka College of Engineering</span>
+            <span><strong>Course:</strong> MCA, Semester 3</span>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
 
-    This system implements a comprehensive fraud detection pipeline for UPI (Unified Payments Interface) digital payments:
-
-    - **Data**: IEEE-CIS Fraud Detection & PaySim datasets as proxies for private UPI data
-    - **Models**: Logistic Regression, Random Forest, XGBoost, LightGBM with rolling time-window CV
-    - **Drift Monitoring**: PSI (Population Stability Index) & KS (Kolmogorov-Smirnov) tests on features & scores
-    - **Explainability**: TreeSHAP per-instance explanations + global importance tracking
-    - **Retraining**: Static vs Scheduled vs Drift-Triggered strategies comparison
-    - **Delayed Labels**: Simulation of 1/7/30-day label delays with performance degradation analysis
-
-    **Student**: Pavan C (USN: 4VV25MC060)
-    **College**: Vidyavardhaka College of Engineering
-    **Course**: MCA, Semester 3
-    """)
-
-    # Target achievement
-    st.subheader("🎯 Target Achievement")
+    # Target achievement with glass cards
+    st.markdown("""
+    <div class="glass-card animate-fade-in-up" style="margin-bottom: 2rem;">
+        <h2 style="margin-bottom: 1.5rem; font-size: 1.5rem;">🎯 Target Achievement</h2>
+    """, unsafe_allow_html=True)
 
     if not reports['ieee_test_metrics'].empty:
         best_row = reports['ieee_test_metrics'].loc[reports['ieee_test_metrics']['pr_auc'].idxmax()]
@@ -341,10 +900,27 @@ if page == "📊 Overview":
         cols = st.columns(len(targets))
         for i, (target, (passed, value)) in enumerate(targets.items()):
             with cols[i]:
-                if passed:
-                    st.success(f"✅ {target}\n\nValue: {value:.4f}")
-                else:
-                    st.error(f"❌ {target}\n\nValue: {value:.4f}")
+                icon = "✅" if passed else "❌"
+                bg_color = "rgba(34, 197, 94, 0.15)" if passed else "rgba(239, 68, 68, 0.15)"
+                border_color = "#22c55e" if passed else "#ef4444"
+                text_color = "#22c55e" if passed else "#ef4444"
+                st.markdown(f"""
+                <div style="
+                    background: {bg_color};
+                    border: 2px solid {border_color};
+                    border-radius: var(--radius-lg);
+                    padding: 1.5rem;
+                    text-align: center;
+                    transition: all var(--transition-normal);
+                    height: 100%;
+                " onmouseover="this.style.transform='translateY(-4px)'; this.style.boxShadow='var(--shadow-lg)'" onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='none'">
+                    <div style="font-size: 2.5rem; margin-bottom: 0.5rem;">{icon}</div>
+                    <div style="font-family: 'Space Grotesk', sans-serif; font-size: 1rem; font-weight: 600; color: var(--text-primary); margin-bottom: 0.75rem;">{target}</div>
+                    <div style="font-family: 'Space Grotesk', sans-serif; font-size: 1.75rem; font-weight: 700; color: {text_color};">{value:.4f}</div>
+                </div>
+                """, unsafe_allow_html=True)
+
+    st.markdown("</div>", unsafe_allow_html=True)
 
     # Pipeline diagram
     st.subheader("🔄 Pipeline Architecture")
