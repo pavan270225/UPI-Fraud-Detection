@@ -724,11 +724,53 @@ st.sidebar.markdown("---")
 dark_mode = st.sidebar.toggle("🌙 Dark Mode", value=st.session_state.dark_mode)
 st.session_state.dark_mode = dark_mode
 
-# Apply theme via data attribute on document
-if dark_mode:
-    st.markdown('<script>document.documentElement.setAttribute("data-theme", "dark"); document.body.classList.add("dark-mode")</script>', unsafe_allow_html=True)
-else:
-    st.markdown('<script>document.documentElement.removeAttribute("data-theme"); document.body.classList.remove("dark-mode")</script>', unsafe_allow_html=True)
+# Apply theme - robust approach using script that runs on every render
+# and also sets up persistence via localStorage
+theme_script = f"""
+<script>
+    (function() {{
+        const isDark = {str(dark_mode).lower()};
+        const root = document.documentElement;
+        const body = document.body;
+
+        if (isDark) {{
+            root.setAttribute('data-theme', 'dark');
+            body.classList.add('dark-mode');
+            localStorage.setItem('upi-dark-mode', 'true');
+        }} else {{
+            root.removeAttribute('data-theme');
+            body.classList.remove('dark-mode');
+            localStorage.setItem('upi-dark-mode', 'false');
+        }}
+
+        // Also apply to Streamlit containers
+        const containers = document.querySelectorAll('[data-testid="stAppViewContainer"], [data-testid="stSidebar"], [data-testid="stHeader"]');
+        containers.forEach(el => {{
+            if (isDark) el.setAttribute('data-theme', 'dark');
+            else el.removeAttribute('data-theme');
+        }});
+    }})();
+</script>
+"""
+st.markdown(theme_script, unsafe_allow_html=True)
+
+# Also inject a script that restores theme on page load (runs once)
+restore_script = """
+<script>
+    // Restore theme from localStorage on initial page load
+    if (!window.__upiThemeRestored) {
+        window.__upiThemeRestored = true;
+        const saved = localStorage.getItem('upi-dark-mode');
+        if (saved === 'true') {
+            document.documentElement.setAttribute('data-theme', 'dark');
+            document.body.classList.add('dark-mode');
+            const containers = document.querySelectorAll('[data-testid="stAppViewContainer"], [data-testid="stSidebar"], [data-testid="stHeader"]');
+            containers.forEach(el => el.setAttribute('data-theme', 'dark'));
+        }
+    }
+</script>
+"""
+st.markdown(restore_script, unsafe_allow_html=True)
 
 st.sidebar.markdown("---")
 
