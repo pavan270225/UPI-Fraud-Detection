@@ -206,13 +206,50 @@ def prepare_xy(df):
 st.sidebar.title("🛡️ UPI Fraud Detection")
 st.sidebar.markdown("---")
 
-# Theme toggle
+# Theme toggle - uses JavaScript to toggle data-theme attribute on <html> element
+# and persists to localStorage for persistence across sessions
 dark_mode = st.sidebar.toggle("🌙 Dark Mode", value=st.session_state.dark_mode)
 st.session_state.dark_mode = dark_mode
-if dark_mode:
-    st.markdown('<script>document.body.classList.add("dark-mode")</script>', unsafe_allow_html=True)
-else:
-    st.markdown('<script>document.body.classList.remove("dark-mode")</script>', unsafe_allow_html=True)
+
+# Inject JavaScript to handle theme switching via data-theme attribute on <html>
+theme_script = f"""
+<script>
+    // Function to apply theme
+    function applyTheme(isDark) {{
+        const html = document.documentElement;
+        if (isDark) {{
+            html.setAttribute('data-theme', 'dark');
+        }} else {{
+            html.setAttribute('data-theme', 'light');
+        }}
+        localStorage.setItem('upi-dark-mode', isDark);
+    }}
+
+    // Apply saved theme on load (runs before Streamlit renders)
+    (function() {{
+        const saved = localStorage.getItem('upi-dark-mode');
+        if (saved !== null) {{
+            applyTheme(saved === 'true');
+        }}
+    }})();
+
+    // Watch for toggle changes and apply theme
+    const observer = new MutationObserver(() => {{
+        const toggle = document.querySelector('[data-testid="stSidebar"] input[type="checkbox"]');
+        if (toggle && toggle._upiThemeBound !== true) {{
+            toggle._upiThemeBound = true;
+            toggle.addEventListener('change', (e) => {{
+                applyTheme(e.target.checked);
+            }});
+        }}
+    }});
+    observer.observe(document.body, {{ childList: true, subtree: true }});
+
+    // Also apply current state on each run
+    applyTheme({str(dark_mode).lower()});
+</script>
+"""
+st.markdown(theme_script, unsafe_allow_html=True)
 
 st.sidebar.markdown("---")
 
