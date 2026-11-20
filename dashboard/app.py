@@ -1341,7 +1341,7 @@ elif page == "🎯 Risk Scoring":
                     opacity=0.7, nbinsx=50, marker_color='red'
                 ))
                 fig.update_layout(barmode='overlay', xaxis_title='Risk Score', yaxis_title='Count')
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, use_container_width=True, key="risk_score_hist")
 
             with col2:
                 st.subheader("Score Statistics")
@@ -1551,7 +1551,7 @@ elif page == "🤖 Model Comparison":
                         fig.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 1])))
 
                     fig.update_layout(height=400, showlegend=chart_type!="Horizontal Bar")
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, use_container_width=True, key=f"comp_ieee_{chart_type.lower().replace(' ', '_')}")
 
             with col2:
                 if 'ieee_precision_at_100' in comp_df.columns and comp_df['ieee_precision_at_100'].notna().any():
@@ -1574,7 +1574,7 @@ elif page == "🤖 Model Comparison":
                         )
 
                     fig.update_layout(height=400, showlegend=chart_type!="Horizontal Bar")
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, use_container_width=True, key=f"comp_paysim_{chart_type.lower().replace(' ', '_')}")
 
             # Heatmap comparison
             st.subheader("🔥 Metric Heatmap")
@@ -1588,7 +1588,7 @@ elif page == "🤖 Model Comparison":
                     title="Cross-Dataset Metric Comparison"
                 )
                 fig.update_layout(height=400)
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, use_container_width=True, key="comp_heatmap")
 
         else:
             st.info("Model column not found in metrics. Available columns: " + ", ".join(
@@ -2126,7 +2126,7 @@ elif page == "🔍 SHAP Explanations":
                             paper_bgcolor='rgba(0,0,0,0)',
                             font=dict(color='var(--text-primary)')
                         )
-                        st.plotly_chart(fig, use_container_width=True)
+                        st.plotly_chart(fig, use_container_width=True, key="shap_waterfall")
 
                     with col_right:
                         st.subheader("📋 Feature Contributions Table")
@@ -2189,7 +2189,7 @@ elif page == "🔍 SHAP Explanations":
                 )
                 fig.update_traces(texttemplate='%{text:.4f}', textposition='outside')
                 fig.update_layout(height=600, showlegend=False)
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, use_container_width=True, key="shap_importance_bar")
 
                 # Summary statistics
                 col_s1, col_s2, col_s3 = st.columns(3)
@@ -2243,7 +2243,7 @@ elif page == "🔍 SHAP Explanations":
                         fig.add_hline(y=0.3, line_dash="dash", line_color="#22c55e", annotation_text="Stable threshold (0.3)")
                         fig.add_hline(y=0.5, line_dash="dash", line_color="#ef4444", annotation_text="Unstable threshold (0.5)")
                         fig.update_layout(xaxis_tickangle=-45, height=500)
-                        st.plotly_chart(fig, use_container_width=True)
+                        st.plotly_chart(fig, use_container_width=True, key="shap_stability_cv_bar")
 
                     with col_viz2:
                         # Scatter: mean importance vs stability
@@ -2259,7 +2259,7 @@ elif page == "🔍 SHAP Explanations":
                         fig.add_hline(y=0.3, line_dash="dash", line_color="#22c55e")
                         fig.add_hline(y=0.5, line_dash="dash", line_color="#ef4444")
                         fig.update_layout(height=500)
-                        st.plotly_chart(fig, use_container_width=True)
+                        st.plotly_chart(fig, use_container_width=True, key="shap_stability_scatter")
 
                     # Stability table with filtering
                     st.subheader("📋 Stability Details")
@@ -2315,7 +2315,7 @@ elif page == "🔍 SHAP Explanations":
                                     title=f'SHAP Interaction: {feature_a} × {feature_b}',
                                     labels={'x': feature_a, 'y': feature_b, 'color': 'Interaction SHAP'}
                                 )
-                                st.plotly_chart(fig, use_container_width=True)
+                                st.plotly_chart(fig, use_container_width=True, key=f"shap_interaction_{feature_a}_{feature_b}")
                             else:
                                 st.info("Interaction values not available. Using SHAP dependence plot instead.")
 
@@ -2328,7 +2328,7 @@ elif page == "🔍 SHAP Explanations":
                                     title=f'SHAP Dependence: {feature_a} (colored by {feature_b})',
                                     labels={'x': f'{feature_a} value', 'y': f'SHAP value for {feature_a}'}
                                 )
-                                st.plotly_chart(fig, use_container_width=True)
+                                st.plotly_chart(fig, use_container_width=True, key=f"shap_dependence_{feature_a}_{feature_b}")
                         except Exception as e:
                             st.warning(f"Interaction computation not available: {e}")
                             st.info("Run notebook 05_shap_explanations.ipynb for full interaction analysis")
@@ -2638,7 +2638,7 @@ elif page == "📈 Drift Monitoring":
                         color_discrete_sequence=px.colors.qualitative.Set3
                     )
                     fig.update_layout(height=400)
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, use_container_width=True, key="drift_alert_type_pie")
 
             with col_chart2:
                 if 'column' in alerts_df.columns:
@@ -2650,7 +2650,7 @@ elif page == "📈 Drift Monitoring":
                         color=feat_counts.values, color_continuous_scale='Viridis'
                     )
                     fig.update_layout(height=400, showlegend=False)
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, use_container_width=True, key="drift_top_features_bar")
 
             # Time series
             if 'timestamp' in alerts_df.columns:
@@ -2667,7 +2667,7 @@ elif page == "📈 Drift Monitoring":
                         markers=True
                     )
                     fig.update_layout(height=400)
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, use_container_width=True, key="drift_alert_timeline")
                 except Exception as e:
                     st.info(f"Time series plot unavailable: {e}")
 
@@ -2711,7 +2711,7 @@ elif page == "📈 Drift Monitoring":
                 fig.add_vline(x=0.2, line_dash="dash", line_color="#f59e0b", annotation_text="PSI Threshold (0.2)")
                 fig.add_vline(x=0.3, line_dash="dash", line_color="#ef4444", annotation_text="High Severity (0.3)")
                 fig.update_layout(height=400)
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, use_container_width=True, key="drift_score_hist")
 
             # Feature stability ranking
             if 'column' in alerts_df.columns and 'value' in alerts_df.columns:
@@ -2729,7 +2729,7 @@ elif page == "📈 Drift Monitoring":
                     labels={'avg_drift': 'Avg Drift Score', 'column': 'Feature', 'alert_count': 'Alert Count'}
                 )
                 fig.update_layout(height=500)
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, use_container_width=True, key="drift_feature_ranking")
 
                 st.dataframe(feature_stats, use_container_width=True, hide_index=True)
         else:
@@ -2845,7 +2845,7 @@ elif page == "⚙️ Retraining Strategies":
                         showlegend=True,
                         height=500
                     )
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, use_container_width=True, key="retrain_radar")
 
                 elif chart_type == "Horizontal Bar":
                     for metric in primary_metrics:
@@ -2857,7 +2857,7 @@ elif page == "⚙️ Retraining Strategies":
                             text_auto='.4f'
                         )
                         fig.update_layout(showlegend=False, height=300, yaxis={'categoryorder': 'total ascending'})
-                        st.plotly_chart(fig, use_container_width=True)
+                        st.plotly_chart(fig, use_container_width=True, key=f"retrain_hbar_{metric}")
 
                 else:  # Grouped Bar
                     for metric in primary_metrics:
@@ -2868,7 +2868,7 @@ elif page == "⚙️ Retraining Strategies":
                             color_discrete_sequence=px.colors.qualitative.Set2
                         )
                         fig.update_layout(showlegend=False, height=300)
-                        st.plotly_chart(fig, use_container_width=True)
+                        st.plotly_chart(fig, use_container_width=True, key=f"retrain_gbar_{metric}")
 
         with tab_viz2:
             if 'n_retrains' in comp_df.columns and 'avg_model_age_days' in comp_df.columns:
@@ -2886,7 +2886,7 @@ elif page == "⚙️ Retraining Strategies":
                         labels={'n_retrains': 'Number of Retrains', 'pr_auc': 'PR-AUC'}
                     )
                     fig.update_layout(height=400)
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, use_container_width=True, key="retrain_scatter")
 
                 with col2:
                     # Model age distribution
@@ -2897,7 +2897,7 @@ elif page == "⚙️ Retraining Strategies":
                         color_discrete_sequence=px.colors.qualitative.Pastel
                     )
                     fig.update_layout(showlegend=False, height=400)
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, use_container_width=True, key="retrain_model_age_bar")
 
                 # Efficiency summary
                 st.subheader("📊 Efficiency Summary")
@@ -2956,7 +2956,7 @@ elif page == "⚙️ Retraining Strategies":
                         labels={'window': 'Window', 'pr_auc': 'PR-AUC'}
                     )
                     fig.update_layout(height=400)
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, use_container_width=True, key="retrain_window_trend")
             else:
                 st.info("Detailed window-by-window results not available. Run notebook 06_retraining_strategies.ipynb.")
 
@@ -3123,7 +3123,7 @@ elif page == "⏱️ Delayed Labels":
             fig.add_vrect(x0=1, x1=7, fillcolor="yellow", opacity=0.1, layer="below", line_width=0, annotation_text="Moderate", annotation_position="top")
             fig.add_vrect(x0=7, x1=max_delay + 1, fillcolor="red", opacity=0.1, layer="below", line_width=0, annotation_text="Severe", annotation_position="top right")
 
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, use_container_width=True, key="delay_impact_line")
 
             # Degradation summary with visual cards
             st.subheader("📉 Relative Degradation vs Oracle (0-day delay)")
@@ -3180,7 +3180,7 @@ elif page == "⏱️ Delayed Labels":
                 labels={'delay_days': 'Delay (Days)', 'value': 'Score', 'metric': 'Metric'}
             )
             fig.update_layout(height=500)
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, use_container_width=True, key="delay_all_metrics_line")
 
             # Heatmap of degradation
             st.subheader("🔥 Degradation Heatmap")
@@ -3201,7 +3201,7 @@ elif page == "⏱️ Delayed Labels":
                     title="Percentage Degradation from Oracle (0-day)"
                 )
                 fig.update_layout(height=400)
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, use_container_width=True, key="delay_degradation_heatmap")
 
         with tab_insights:
             st.subheader("💡 Key Insights & Recommendations")
@@ -3447,7 +3447,7 @@ elif page == "📜 Prediction History":
                     height=500,
                     template='plotly_white'
                 )
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, use_container_width=True, key="history_risk_trend")
 
                 # Predictions volume over time
                 fig2 = px.bar(
@@ -3456,7 +3456,7 @@ elif page == "📜 Prediction History":
                     labels={'timestamp': 'Session Time', 'n_predictions': 'Predictions'}
                 )
                 fig2.update_layout(height=400)
-                st.plotly_chart(fig2, use_container_width=True)
+                st.plotly_chart(fig2, use_container_width=True, key="history_volume_bar")
 
             else:
                 st.info("Run more scoring sessions to see trend charts.")
@@ -3500,7 +3500,7 @@ elif page == "📜 Prediction History":
                         color='model', text_auto='.2%'
                     )
                     fig.update_layout(showlegend=False, height=350)
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, use_container_width=True, key="history_model_fraud_bar")
 
             with col2:
                 # Dataset comparison
@@ -3531,7 +3531,7 @@ elif page == "📜 Prediction History":
                     title='Predictions Distribution by Dataset'
                 )
                 fig.update_layout(height=350)
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, use_container_width=True, key="history_dataset_pie")
 
             # Threshold analysis
             st.markdown("**Threshold Analysis**")
@@ -3544,7 +3544,7 @@ elif page == "📜 Prediction History":
                     labels={'threshold': 'Decision Threshold', 'avg_score': 'Avg Risk Score'}
                 )
                 fig.update_layout(height=400)
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, use_container_width=True, key="history_threshold_scatter")
 
         # Export filtered data
         st.divider()
