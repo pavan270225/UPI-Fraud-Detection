@@ -731,41 +731,18 @@ def prepare_xy(df):
 st.sidebar.title("🛡️ UPI Fraud Detection")
 st.sidebar.markdown("---")
 
-# Theme toggle
+# Theme toggle - uses Streamlit's native theme system via query param + rerun
 dark_mode = st.sidebar.toggle("🌙 Dark Mode", value=st.session_state.dark_mode)
-st.session_state.dark_mode = dark_mode
 
-# Apply theme immediately via JavaScript - toggles data-theme attribute on <html>
-theme_js = f"""
-<script>
-    (function() {{
-        const isDark = {str(dark_mode).lower()};
-        const html = document.documentElement;
-
-        if (isDark) {{
-            html.setAttribute('data-theme', 'dark');
-            localStorage.setItem('upi-dark-mode', 'true');
-        }} else {{
-            html.removeAttribute('data-theme');
-            localStorage.setItem('upi-dark-mode', 'false');
-        }}
-    }})();
-</script>
-"""
-st.markdown(theme_js, unsafe_allow_html=True)
-
-# Also inject script to restore theme on page load (runs before Streamlit renders)
-init_theme_js = """
-<script>
-    (function() {
-        const saved = localStorage.getItem('upi-dark-mode');
-        if (saved === 'true') {
-            document.documentElement.setAttribute('data-theme', 'dark');
-        }
-    })();
-</script>
-"""
-st.markdown(init_theme_js, unsafe_allow_html=True)
+if dark_mode != st.session_state.dark_mode:
+    st.session_state.dark_mode = dark_mode
+    # Use Streamlit's native theme switching via query param
+    if dark_mode:
+        st.query_params["theme"] = "dark"
+    else:
+        if "theme" in st.query_params:
+            del st.query_params["theme"]
+    st.rerun()
 
 st.sidebar.markdown("---")
 
