@@ -157,8 +157,8 @@ st.markdown("""
         --transition-slow: 400ms cubic-bezier(0.4, 0, 0.2, 1);
     }
 
-    /* Dark mode - uses Streamlit's native [data-theme="dark"] on html element */
-    [data-theme="dark"] {
+    /* Dark mode - uses custom .theme-dark class on html element (toggled via JS) */
+    html.theme-dark {
         --bg-primary: #030712;
         --bg-secondary: #0f172a;
         --bg-tertiary: #1e293b;
@@ -671,11 +671,11 @@ st.markdown("""
     }
 
     /* Dark mode specific adjustments */
-    [data-theme="dark"] .stApp {
+    html.theme-dark .stApp {
         background: var(--bg-primary) !important;
     }
 
-    [data-theme="dark"] .stApp::before {
+    html.theme-dark .stApp::before {
         background:
             radial-gradient(ellipse 80% 50% at 20% 0%, rgba(129, 140, 248, 0.1) 0%, transparent 50%),
             radial-gradient(ellipse 60% 40% at 80% 100%, rgba(167, 139, 250, 0.08) 0%, transparent 50%),
@@ -731,18 +731,44 @@ def prepare_xy(df):
 st.sidebar.title("🛡️ UPI Fraud Detection")
 st.sidebar.markdown("---")
 
-# Theme toggle - uses Streamlit's native theme system via query param + rerun
+# Theme toggle - uses custom class on <html> element via JavaScript
 dark_mode = st.sidebar.toggle("🌙 Dark Mode", value=st.session_state.dark_mode)
 
 if dark_mode != st.session_state.dark_mode:
     st.session_state.dark_mode = dark_mode
-    # Use Streamlit's native theme switching via query param
-    if dark_mode:
-        st.query_params["theme"] = "dark"
-    else:
-        if "theme" in st.query_params:
-            del st.query_params["theme"]
     st.rerun()
+
+# Apply theme via JavaScript - toggles 'theme-dark' class on <html>
+theme_js = f"""
+<script>
+    (function() {{
+        const isDark = {str(dark_mode).lower()};
+        const html = document.documentElement;
+
+        if (isDark) {{
+            html.classList.add('theme-dark');
+            localStorage.setItem('upi-dark-mode', 'true');
+        }} else {{
+            html.classList.remove('theme-dark');
+            localStorage.setItem('upi-dark-mode', 'false');
+        }}
+    }})();
+</script>
+"""
+st.markdown(theme_js, unsafe_allow_html=True)
+
+# Restore theme on page load (runs before Streamlit renders)
+init_theme_js = """
+<script>
+    (function() {
+        const saved = localStorage.getItem('upi-dark-mode');
+        if (saved === 'true') {
+            document.documentElement.classList.add('theme-dark');
+        }
+    })();
+</script>
+"""
+st.markdown(init_theme_js, unsafe_allow_html=True)
 
 st.sidebar.markdown("---")
 
